@@ -1,0 +1,1 @@
+"""Minimal grouped SpecItOut shell."""

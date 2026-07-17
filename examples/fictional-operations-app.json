@@ -1,0 +1,50 @@
+{
+  "public_demo": {
+    "fictional": true,
+    "data_classification": "public-demo",
+    "purpose": "Illustrative export-shaped input for explaining the system; it is not copied or redacted from a real application."
+  },
+  "application": {
+    "name": "Northstar Operations",
+    "description": "A fictional field-service coordination application."
+  },
+  "data_types": [
+    {
+      "name": "WorkOrder",
+      "fields": [
+        {"name": "status", "type": "WorkOrderStatus"},
+        {"name": "assigned_team", "type": "Team"},
+        {"name": "due_date", "type": "date"}
+      ]
+    },
+    {
+      "name": "Team",
+      "fields": [
+        {"name": "name", "type": "text"},
+        {"name": "dispatch_region", "type": "text"}
+      ]
+    }
+  ],
+  "option_sets": [
+    {
+      "name": "WorkOrderStatus",
+      "values": ["planned", "in_progress", "blocked", "completed"]
+    }
+  ],
+  "workflows": [
+    {
+      "name": "Assign work order",
+      "trigger": "dispatcher submits assignment",
+      "reads": ["WorkOrder", "Team"],
+      "writes": ["WorkOrder.assigned_team", "WorkOrder.status"],
+      "rule": "Only a dispatcher may assign a team."
+    }
+  ],
+  "pages": [
+    {
+      "name": "Dispatch board",
+      "purpose": "Shows work orders by status and team.",
+      "conditions": ["Show blocked work orders with a visible escalation marker."]
+    }
+  ]
+}

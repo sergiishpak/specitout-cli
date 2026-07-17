@@ -1,0 +1,44 @@
+[build-system]
+requires = [
+  "setuptools>=68",
+  "wheel",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "specitout-cli"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "psycopg[binary]>=3.2,<4",
+  "pytest>=8,<9",
+  "sentence-transformers>=3,<4",
+]
+
+[project.scripts]
+specitout = "specitout.app:main"
+
+[tool.setuptools]
+package-dir = {"" = "scripts"}
+py-modules = [
+  "bubble_ingestion_contract",
+]
+packages = [
+  "specitout",
+  "specitout.resources",
+  "specitout.resources.runtime",
+  "specitout.resources.runtime.migrations",
+  "bubble_context_pack_internal",
+  "bubble_ingestion",
+]
+
+[tool.setuptools.package-data]
+specitout = [
+  "resources/runtime/migrations/*.sql",
+  "resources/runtime/migrations/0001_specitout_runtime_baseline/*.sql",
+]
+
+[tool.pytest.ini_options]
+pythonpath = [
+  "scripts",
+]

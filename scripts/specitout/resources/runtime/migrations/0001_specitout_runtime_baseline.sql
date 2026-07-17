@@ -1,0 +1,2 @@
+-- SpecItOut runtime baseline.
+-- The runtime applier streams the ordered SQL parts in ./0001_specitout_runtime_baseline.

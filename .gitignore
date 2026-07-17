@@ -1,0 +1,31 @@
+.DS_Store
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Application exports and derived working data stay local.
+.local/
+tmp/
+output/
+/runtime/
+fixtures/private/
+
+# Agent and editor state
+.serena/
+.idea/
+.vscode/
+
+# Python and build outputs
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.coverage
+
+# Local model and package caches
+.cache/
+.venv/
