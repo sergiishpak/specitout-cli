@@ -5,7 +5,7 @@ installs the CLI and complete skill from one repository revision, records
 provenance and checks platform dependencies. You can then use the agent or run
 the commands below yourself.
 
-These examples describe the unreleased 0.2.1 interface. Paths, app slug, export
+These examples describe the 0.2.2 interface. Paths, app slug, export
 version and entity identifiers below are placeholders. Keep private exports
 outside the public source checkout.
 

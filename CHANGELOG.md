@@ -5,6 +5,18 @@ Versions use Semantic Versioning. Entries describe repository versions; publicat
 ## [Unreleased]
 
 
+## [0.2.2] - 2026-11-07
+### Fixed
+- Start the app-owned Postgres runtime on Linux without requiring write access
+  to the distribution's shared Unix-socket directory. CLI connections remain on
+  localhost TCP.
+
+### Validation
+- Add native Ubuntu CI coverage with matching Postgres/pgvector packages and an
+  unavailable socket-default regression.
+- Verify installation of missing native prerequisites in an isolated Ubuntu
+  environment and implicit skill discovery/use in a fresh Codex CLI session.
+
 ## [0.2.1] - 2026-11-06
 ### Fixed
 - Return supported, workspace-bound next commands with the selected version and readiness-appropriate recovery steps.

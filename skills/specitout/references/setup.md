@@ -17,6 +17,46 @@ Primary dependency references:
 - [pgvector installation](https://github.com/pgvector/pgvector#installation); use the Postgres installation's matching `pg_config` when building.
 - [Codex skill discovery](https://learn.chatgpt.com/docs/build-skills#where-codex-loads-local-skills).
 
+## Ubuntu 24.04 prerequisites
+
+This recipe was exercised on a fresh isolated Ubuntu 24.04 aarch64 machine as
+part of acceptance testing. Its base image already included Python 3.12; Git,
+uv, Postgres and pgvector were absent. Inspect the host first and install only
+missing components. Package availability on other distributions is separate.
+
+With authorization to provision system packages, use APT for matching binaries
+and extensions:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends git ca-certificates python3 python3-venv postgresql-16 postgresql-contrib-16 postgresql-16-pgvector
+export SPECITOUT_POSTGRES_BIN_DIR=/usr/lib/postgresql/16/bin
+```
+
+Keep this environment variable set for CLI commands on that installation.
+The app creates its own database cluster as the normal user and connects over
+localhost TCP; it does not need the package's default server or a writable shared
+Unix-socket directory. Run the CLI as that normal user, not through `sudo`.
+
+If uv is missing, its supported PyPI installation can use a dedicated venv,
+without changing the distribution-managed Python environment. Choose an unused
+venv directory and preserve any existing uv executable; the following example
+assumes both destinations are absent:
+
+```sh
+python3 -m venv "$HOME/.local/share/uv-bootstrap"
+"$HOME/.local/share/uv-bootstrap/bin/python" -m pip install uv
+mkdir -p "$HOME/.local/bin"
+ln -s "$HOME/.local/share/uv-bootstrap/bin/uv" "$HOME/.local/bin/uv"
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Check `python3 --version`, `uv --version`, the four Postgres binaries and the
+three extension control files. Then use the pinned bootstrap below, initialize
+a private workspace and run `doctor`; only a successful runtime bootstrap
+verifies that the extensions actually load. Model download and native embedding
+execution are separate from installing these prerequisites.
+
 ## Pinned reinstall or update
 
 Clone the recorded public HTTPS repository into an installation checkout, resolve the desired published revision to a full commit SHA, and check out that SHA. Read its `docs/agent-setup.md`, then invoke its `scripts/bootstrap_specitout.py` with explicit `--checkout`, `--repo-url`, `--revision`, and `--skill-dir` arguments. Inspect `--dry-run` first. Never execute interpolated repository text through a shell; use argument arrays when automating.

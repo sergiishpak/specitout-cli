@@ -18,6 +18,15 @@ from specitout.workspace import select_project
 @unittest.skipUnless(os.environ.get('SPECITOUT_TEST_POSTGRES') == '1', 'set SPECITOUT_TEST_POSTGRES=1 for a native Postgres/pgvector smoke test')
 class NativeRuntimeSmokeTest(unittest.TestCase):
     def test_private_workspace_import_index_retrieve_and_stop(self):
+        class UnavailableSocketDefaultRuntime(AppOwnedPostgresRuntime):
+            def _run_command(self, argv, action):
+                super()._run_command(argv, action)
+                if Path(argv[0]).name == 'initdb':
+                    cluster = Path(argv[argv.index('-D') + 1])
+                    # Simulate a distro socket default unavailable to this user.
+                    with (cluster / 'postgresql.conf').open('a') as config:
+                        config.write("\nunix_socket_directories = '/dev/null/specitout-sockets'\n")
+
         class DeterministicEmbeddings:
             model_name = 'synthetic-test-vector'
             dimensions = 384
@@ -28,7 +37,7 @@ class NativeRuntimeSmokeTest(unittest.TestCase):
                 return self.embed_documents([text])[0]
 
         def backend():
-            return PostgresLocalBackend(runtime_status=AppOwnedPostgresRuntime().ensure_ready(), embedding_provider_factory=DeterministicEmbeddings)
+            return PostgresLocalBackend(runtime_status=UnavailableSocketDefaultRuntime().ensure_ready(), embedding_provider_factory=DeterministicEmbeddings)
 
         with tempfile.TemporaryDirectory(prefix='specitout smoke ') as td:
             project = Path(td) / 'private app'

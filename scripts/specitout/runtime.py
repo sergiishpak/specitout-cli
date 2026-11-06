@@ -75,7 +75,8 @@ class AppOwnedPostgresRuntime:
                     "-l",
                     str(log_path),
                     "-o",
-                    f"-c listen_addresses=127.0.0.1 -p {port}",
+                    # Clients use TCP; distro socket directories may be unwritable.
+                    f"-c listen_addresses=127.0.0.1 -c unix_socket_directories= -p {port}",
                     "start",
                 ],
                 "start local Postgres runtime",

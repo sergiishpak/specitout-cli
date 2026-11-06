@@ -22,7 +22,7 @@ bundled skill from the same Git revision, and creates a separate private folder
 for your app. Git is not required in that folder. One CLI installation can serve
 several workspaces.
 
-**Version:** 0.2.1. Install from an explicit repository commit using the setup
+**Version:** 0.2.2. Install from an explicit repository commit using the setup
 guide; a package-index release is not assumed.
 The initial native-runtime target is macOS or Linux as a non-root user, with
 Python 3.11+, Postgres, pgvector and sentence-transformers. Native Windows,

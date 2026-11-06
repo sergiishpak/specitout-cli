@@ -141,14 +141,75 @@ also passed both Ubuntu Python 3.11 and 3.12 jobs: ordinary tests, package build
 and installed-wheel checks outside the checkout. Those jobs do not exercise the
 native Linux Postgres runtime.
 
+## Clean Ubuntu prerequisites and native runtime — 0.2.2
+
+A fresh OrbStack Ubuntu 24.04 aarch64 Linux machine was created with host-file
+sharing disabled. The base image contained Python 3.12, but no Git, uv,
+Postgres binaries, pgvector or SpecItOut. This is a clean Linux userspace test,
+not a clean physical Mac or Windows installation.
+
+APT installed Git, Python venv support and matching Postgres 16/contrib/pgvector
+packages. uv was installed into a dedicated user venv, then the public pinned
+bootstrap installed the CLI and skill as the normal user. The observed versions
+were Python 3.12.3, uv 0.13.7, Postgres 16.15 and pgvector 0.6.0. Passive
+diagnostics found the matching binaries and extension files.
+
+The first 0.2.1 import exposed a real Linux startup defect: Postgres attempted
+to create a lock file in the distribution's shared socket directory, which was
+not writable by the normal user. A single-variable experiment started that
+same cluster successfully with Unix sockets disabled. Version 0.2.2 applies
+that setting because the CLI, migrations and retrieval use localhost TCP.
+
+A locally built 0.2.2 wheel then recovered the same failed workspace and passed
+import, first model download, all ten real embeddings, activation, semantic
+search, entity, usage, paths, bundle, zero-pass ready resume and runtime stop.
+The native regression failed before the fix and passed after it; it forces an
+unavailable socket default after real `initdb`. Ordinary tests remained
+98 passed / one opt-in native smoke skipped, and native smoke passed separately.
+An independent read-only review found no material issues.
+
+Native Ubuntu CI now exercises the matched Postgres 16 packages and full
+workspace lifecycle with deterministic embeddings. As with the earlier CI
+checks, deterministic vectors verify runtime plumbing rather than model quality.
+The [Ubuntu prerequisite recipe](../skills/specitout/references/setup.md#ubuntu-2404-prerequisites)
+travels with the installed skill. Linux dependency installation in this run
+also downloaded CUDA-related PyTorch packages despite CPU model execution;
+CPU selection does not by itself select a smaller package distribution.
+
+## Fresh agent discovery and use — 2026-11-07
+
+The complete skill and CLI from public commit
+[`c07ed41ace06bd60b7408fdcc1fa78e32b0df9cd`](https://github.com/sergiishpak/specitout-cli/commit/c07ed41ace06bd60b7408fdcc1fa78e32b0df9cd)
+were installed into the normal user tool and `~/.agents/skills/specitout`
+locations. The strict skill validator passed.
+
+A new Codex CLI 0.166.0 session ran outside the source checkout, with an empty
+workspace, no inherited conversation, memories disabled, user config ignored
+and ephemeral session mode. Its prompt requested Bubble export processing and
+a source-backed workflow answer without naming SpecItOut or the skill.
+
+The fresh skill catalog listed `specitout`. The actual session independently
+selected it, opened the installed `SKILL.md` and its setup/processing/investigation
+references, initialized the workspace, ran diagnostics, imported the synthetic
+export, computed real embeddings, verified readiness and activated the version.
+It used CLI usage and entity evidence to return the correct scheduling workflow
+with the version and literal source location. It preserved the original export
+and stopped the workspace database. Command events and final evidence were
+checked; this is actual use, beyond frontmatter validation or catalog presence.
+
+This verifies implicit discovery in a fresh Codex CLI session. It does not
+establish discovery in every agent host or the desktop skill picker. The method
+follows the official [skill discovery](https://learn.chatgpt.com/docs/build-skills)
+and [non-interactive session](https://learn.chatgpt.com/docs/non-interactive-mode)
+interfaces; detailed transcripts remain outside the repository.
+
 ## Acceptance still required
 
 - Additional private exports and `.bubble` files: parser coverage, source-locator
   handling, interruption recovery and retrieval relevance beyond this sample.
   Keep detailed logs and client-derived artifacts outside this repository.
-- A fresh external agent session discovering and using the installed skill.
-- Provisioning native prerequisites on a clean operating system and native
-  Linux runtime validation. Native Windows/WSL are not validated targets.
+- Clean macOS provisioning, other Linux distributions/architectures and
+  desktop/other-agent skill discovery. Native Windows/WSL are not validated targets.
 
 The public repository contains no Bubble export JSON files. Synthetic input for
 checks is generated within temporary test directories. The private acceptance

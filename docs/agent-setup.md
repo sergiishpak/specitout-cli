@@ -14,6 +14,8 @@ Read [the self-contained setup reference](../skills/specitout/references/setup.m
 
 The native runtime needs `postgres`, `initdb`, `pg_ctl`, and `psql` from the same Postgres installation/version, with `pg_trgm`, `pgcrypto`, and `vector` available there. Use `SPECITOUT_POSTGRES_BIN_DIR` if binaries are outside PATH. Install missing dependencies through supported platform tooling and existing authorization; there is no universal package-manager command. [Postgres platform downloads](https://www.postgresql.org/download/) and [pgvector installation](https://github.com/pgvector/pgvector#installation) explain the platform choices. A root-only container is a blocker because [initdb refuses root](https://www.postgresql.org/docs/current/app-initdb.html).
 
+For Ubuntu 24.04, the installed skill includes a [tested prerequisite recipe](../skills/specitout/references/setup.md#ubuntu-2404-prerequisites). The app-owned runtime uses localhost TCP and disables Unix sockets, so it does not need write access to the distribution's shared socket directory.
+
 Identify the agent host and report the chosen skill path. [Codex supports `~/.agents/skills`](https://learn.chatgpt.com/docs/build-skills#where-codex-loads-local-skills); this is the example below. Verify other hosts' documentation rather than guessing their paths. Report whether a reload/new session is needed and verify the skill appears; do not claim automatic discovery for every host.
 
 ## Resolve and review one commit
