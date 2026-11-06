@@ -21,7 +21,7 @@ Identify the agent host and report the chosen skill path. [Codex supports `~/.ag
 Clone the supplied public HTTPS URL into a fresh installation directory. The example uses the canonical repository; use the URL actually requested. These commands resolve the fetched revision once, then detach at it. For an explicit release/tag, resolve that fetched ref instead of HEAD. Do not put private exports into this checkout.
 
 ```sh
-git clone -- https://github.com/Sergii-Shpak-072422/specitout-cli.git "/absolute/install/specitout-source"
+git clone -- https://github.com/sergiishpak/specitout-cli.git "/absolute/install/specitout-source"
 git -C "/absolute/install/specitout-source" rev-parse HEAD
 git -C "/absolute/install/specitout-source" checkout --detach FULL_COMMIT_SHA
 ```
@@ -31,7 +31,7 @@ Replace `FULL_COMMIT_SHA` with the full hash printed by Git, never a branch name
 ```sh
 python3 "/absolute/install/specitout-source/scripts/bootstrap_specitout.py" \
   --checkout "/absolute/install/specitout-source" \
-  --repo-url "https://github.com/Sergii-Shpak-072422/specitout-cli.git" \
+  --repo-url "https://github.com/sergiishpak/specitout-cli.git" \
   --revision FULL_COMMIT_SHA \
   --skill-dir "$HOME/.agents/skills" \
   --dry-run
