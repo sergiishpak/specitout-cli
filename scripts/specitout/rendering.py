@@ -13,6 +13,12 @@ from specitout.status_rendering import (
 
 def render_envelope(envelope: CommandEnvelope) -> str:
     data = envelope["data"]
+    if envelope["command"] in {"project init", "doctor", "runtime stop"}:
+        import json
+        lines = [f"{envelope['command']}: {envelope['status']}"]
+        for key, value in data.items():
+            lines.append(f"{key}: {json.dumps(value) if isinstance(value, dict) else value}")
+        return "\n".join(lines) + "\n"
     if envelope["command"] == "query search":
         return _render_query_search(envelope)
     if envelope["command"] == "query entity":
@@ -452,8 +458,12 @@ def _render_pipeline_line(pipeline_run: object) -> str:
     details: list[str] = [status]
     if stage:
         details.append(f"stage={stage}")
+    stage_index = pipeline_run.get("stage_index")
+    stage_count = pipeline_run.get("stage_count")
+    if stage_index is not None and stage_count is not None:
+        details.append(f"stage_position={stage_index}/{stage_count}")
     if progress is not None:
-        details.append(f"progress={progress}%")
+        details.append(f"stage_progress={progress}%")
     return "pipeline: " + " ".join(details)
 
 

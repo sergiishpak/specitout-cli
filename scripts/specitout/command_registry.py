@@ -360,6 +360,20 @@ COMMAND_GROUPS: tuple[GroupSpec, ...] = (
 )
 
 
+# Public runtime surface: unfinished commercial command families are not prerequisites.
+COMMAND_GROUPS = tuple(group for group in COMMAND_GROUPS if group.name not in {"task", "license", "trial"}) + (
+    GroupSpec(name="project", help="Create a private application workspace", description="Create a private application workspace.", commands=(
+        CommandSpec(name="init", help="Initialize a private folder without starting Postgres.", description="Initialize a private folder without starting Postgres.", handler_key="project_init", arguments=(
+            ArgumentSpec(flags=("path",)),
+            ArgumentSpec(flags=("--app",), kwargs={"dest":"app_slug", "required": True}),
+        )),
+    )),
+    GroupSpec(name="runtime", help="Manage the selected local Postgres runtime", description="Manage the selected local Postgres runtime.", commands=(
+        CommandSpec(name="stop", help="Stop only the selected runtime; preserve data.", description="Stop only the selected runtime; preserve data.", handler_key="runtime_stop"),
+    )),
+)
+
+
 HELP_GROUP = GroupSpec(
     name="help",
     help="Show help for a command or subcommand",

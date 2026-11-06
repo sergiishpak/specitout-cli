@@ -12,7 +12,11 @@ from specitout.runtime_errors import SpecItOutRuntimeError
 
 
 def resolve_app_data_root(env: Mapping[str, str] | None = None) -> Path:
-    source = env or os.environ
+    source = os.environ if env is None else env
+    from specitout.workspace import CURRENT_PROJECT
+    project = CURRENT_PROJECT.get()
+    if project is not None:
+        return project.data_root
     override = source.get("SPECITOUT_DATA_ROOT")
     if override:
         return Path(override).expanduser().resolve()
@@ -29,7 +33,7 @@ def resolve_app_data_root(env: Mapping[str, str] | None = None) -> Path:
 
 
 def resolve_embedding_cache_dir(env: Mapping[str, str] | None = None) -> str | None:
-    source = env or os.environ
+    source = os.environ if env is None else env
     override = source.get("SPECITOUT_EMBEDDING_CACHE_DIR")
     if override is not None:
         stripped = override.strip()
@@ -38,7 +42,7 @@ def resolve_embedding_cache_dir(env: Mapping[str, str] | None = None) -> str | N
 
 
 def stage_runtime_migrations(data_root: Path, env: Mapping[str, str] | None = None) -> Path:
-    source = env or os.environ
+    source = os.environ if env is None else env
     override = source.get("SPECITOUT_RUNTIME_MIGRATIONS_DIR")
     if override:
         migrations_dir = Path(override).expanduser().resolve()

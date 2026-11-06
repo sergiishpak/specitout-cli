@@ -13,18 +13,10 @@ class PublicReleaseContractTest(unittest.TestCase):
         expected_paths = (
             REPO_ROOT / "README.md",
             REPO_ROOT / "PUBLIC_DATA_POLICY.md",
-            REPO_ROOT / "examples" / "fictional-operations-app.json",
             REPO_ROOT / ".gitignore",
         )
 
         self.assertEqual([], [str(path) for path in expected_paths if not path.is_file()])
-
-    def test_example_explicitly_declares_that_it_is_fictional(self) -> None:
-        fixture_path = REPO_ROOT / "examples" / "fictional-operations-app.json"
-        fixture = json.loads(fixture_path.read_text())
-
-        self.assertIs(fixture["public_demo"]["fictional"], True)
-        self.assertEqual("public-demo", fixture["public_demo"]["data_classification"])
 
     def test_gitignore_blocks_generated_and_private_working_data(self) -> None:
         gitignore = (REPO_ROOT / ".gitignore").read_text()

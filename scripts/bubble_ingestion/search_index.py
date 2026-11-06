@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
+from specitout.progress import report_active
 from bubble_ingestion.backend_protocol import BackendProtocol
 from bubble_ingestion.errors import IngestionError
 from bubble_ingestion.ingestion_runs import record_phase
@@ -83,9 +84,11 @@ def build_search_documents_with_backend(
         status="running",
     )
     try:
+        report_active("search_document_inputs", 0, 0, "loading entity inputs; unit=rows count=unknown")
         entity_rows = backend.list_export_rows(table="entities", export_id=str(export["id"]))
         public_api_rows = backend.list_export_rows(table="public_api_workflow_index", export_id=str(export["id"]))
         permission_surface_rows = backend.list_export_rows(table="permission_surface_index", export_id=str(export["id"]))
+        report_active("search_document_semantics", len(entity_rows), len(entity_rows), f"loaded {len(entity_rows)} entity rows; building semantic indexes; unit=input_rows")
         semantic_indexes = build_relational_semantic_indexes(
             entity_rows=entity_rows,
             public_api_rows=public_api_rows,
@@ -103,6 +106,7 @@ def build_search_documents_with_backend(
             preserved_data_api_surface = preserved_semantic_indexes.get("data_api_surface")
             if preserved_data_api_surface is not None:
                 semantic_indexes["data_api_surface"] = preserved_data_api_surface
+        report_active("search_document_drafts", 0, 0, "processing search document drafts; unit=documents count=unknown")
         drafts = build_search_documents(
             export_id=str(export["id"]),
             entity_rows=entity_rows,
@@ -114,8 +118,10 @@ def build_search_documents_with_backend(
 
         document_rows = [draft.document for draft in drafts]
         association_rows = [assoc for draft in drafts for assoc in draft.associations]
+        report_active("search_document_write", 0, len(document_rows), f"generated {len(document_rows)} documents and {len(association_rows)} associations; waiting to write; unit=documents")
         backend.replace_search_documents(export_id=str(export["id"]), documents=document_rows, associations=association_rows)
 
+        report_active("search_document_readiness", 0, 0, "document transaction committed; updating export readiness")
         next_readiness_status = _next_readiness_status_after_rebuild(str(export.get("readiness_status")))
         export = backend.update_export(str(export["id"]), readiness_status=next_readiness_status, failure_reason=None)
         active_cutover_performed = False

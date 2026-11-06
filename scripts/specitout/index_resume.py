@@ -6,6 +6,7 @@ from collections.abc import Callable
 from specitout.contracts import CommandEnvelope
 from specitout.progress import IndexProgressReporter
 from specitout.runtime import SpecItOutRuntimeError
+from specitout.status_actions import status_next_actions
 
 ResumeEmitter = Callable[[str], None]
 
@@ -24,6 +25,19 @@ def resume_index(
     emit: ResumeEmitter | None = None,
 ) -> dict[str, object]:
     limit = initial_limit
+    if progress_reporter is not None:
+        progress_reporter("resume_verification", 0, 0, "waiting for target export readiness and database embedding counts")
+    initial_status = _embedding_status(backend, app_slug=app_slug, version_label=version_label)
+    if initial_status is not None:
+        stats = dict(initial_status["stats"])
+        total = _int_stat(stats, "total_documents")
+        embedded = _int_stat(stats, "embedded_documents")
+        remaining = _int_stat(stats, "remaining_documents")
+        _emit(emit, f"progress: index resume verified readiness={initial_status['readiness_status']} overall_embedded={embedded} overall_remaining={remaining} overall_total={total} unit=documents")
+        if initial_status["readiness_status"] == "ready" and total > 0 and embedded == total and remaining == 0:
+            return {"state": "ready", "passes": 0, "limit": limit, "last_result": initial_status}
+        if initial_status["readiness_status"] == "ready":
+            raise SpecItOutRuntimeError("Ready index has inconsistent embedding counters; inspect status before explicitly rebuilding. Existing vectors were preserved.")
     failure_streak = 0
     stagnant_streak = 0
     last_remaining: int | None = None
@@ -56,10 +70,15 @@ def resume_index(
             stagnant_streak += 1
         last_remaining = remaining
 
-        _emit(emit, f"progress: index resume pass={attempt} readiness={readiness} embedded={embedded} remaining={remaining} limit={limit}")
+        overall = _embedding_status(backend, app_slug=app_slug, version_label=version_label)
+        overall_message = ""
+        if overall is not None:
+            overall_stats = dict(overall["stats"])
+            overall_message = f" overall_embedded={_int_stat(overall_stats, 'embedded_documents')} overall_remaining={_int_stat(overall_stats, 'remaining_documents')} overall_total={_int_stat(overall_stats, 'total_documents')}"
+        _emit(emit, f"progress: index resume pass={attempt} readiness={readiness} pass_embedded={embedded} remaining={remaining} limit={limit}{overall_message} unit=documents")
         if last_error:
             _emit(emit, f"progress: index resume pass={attempt} error={last_error}")
-        if readiness == "ready" or remaining == 0:
+        if last_error is None and readiness == "ready":
             return {"state": "ready", "passes": attempt, "limit": limit, "last_result": last_result}
 
         if failure_streak >= 3 and limit > min_limit:
@@ -70,7 +89,10 @@ def resume_index(
             limit = max(min_limit, limit // 2)
             stagnant_streak = 0
             _emit(emit, f"progress: index resume lowering-limit={limit}")
-        time.sleep(sleep_seconds)
+        if attempt < max_passes:
+            if progress_reporter is not None:
+                progress_reporter("resume_backoff", attempt, max_passes, f"waiting {sleep_seconds:g}s before next pass; unit=passes")
+            time.sleep(sleep_seconds)
 
     return {"state": "max_passes_reached", "passes": max_passes, "limit": limit, "last_result": last_result, "last_error": last_error}
 
@@ -122,7 +144,10 @@ def build_resume_envelope(
         },
         "warnings": [str(result["last_error"])] if result.get("last_error") else [],
         "degraded": result["state"] != "ready",
-        "next_actions": ["index status --app <app-slug> --version <version>", "query search --app <app-slug>"],
+        "next_actions": status_next_actions(
+            readiness_state=readiness_status, is_active=bool(last_result.get("is_active")),
+            degraded=result["state"] != "ready", app_slug=app_slug, version_label=version_label,
+        ),
     }
 
 
@@ -148,3 +173,19 @@ def _int_stat(stats: dict[str, object], key: str) -> int:
 def _emit(emit: ResumeEmitter | None, line: str) -> None:
     if emit is not None:
         emit(line)
+
+
+def _embedding_status(backend: object, *, app_slug: str, version_label: str) -> dict[str, object] | None:
+    status_method = getattr(backend, "import_status", None)
+    if status_method is None:
+        return None
+    status = status_method(app_slug=app_slug, version_label=version_label)
+    data = dict(status.get("data") or {})
+    export = dict(data.get("export") or {})
+    if export.get("version_label") != version_label:
+        raise SpecItOutRuntimeError("Index resume status returned an unexpected export version.")
+    stats = dict(data.get("embedding_stats") or {})
+    required = {"total_documents", "embedded_documents", "remaining_documents"}
+    if not required.issubset(stats):
+        raise SpecItOutRuntimeError("Index resume requires complete embedding counts for the target export.")
+    return {"readiness_status": export.get("readiness_status"), "is_active": bool(export.get("is_active")), "stats": stats}

@@ -180,11 +180,11 @@ def keyword_matches(keyword, token_set, normalized_text):
 def classify_index_path(path):
     if path.startswith("styles."):
         return "style"
-    if ".%wf." in path:
+    if ".%wf." in path or ".workflows." in path:
         return "workflow"
-    if path.startswith("%p3."):
+    if path.startswith(("%p3.", "pages.")):
         return "page"
-    if path.startswith("%ed."):
+    if path.startswith(("%ed.", "element_definitions.")):
         return "component"
     if path.startswith("mobile_views."):
         return "mobile_view"

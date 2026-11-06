@@ -34,6 +34,11 @@ limit 1
     if export is None:
         raise SpecItOutRuntimeError(f"Unknown export version {version_label} for application scope {app_slug}.")
 
+    if export.get("readiness_status") != "ready":
+        raise SpecItOutRuntimeError(
+            f"Export {version_label} is not ready for activation; finish indexing and verify readiness first."
+        )
+
     with connect() as conn, conn.cursor() as cur:
         action = _insert_lifecycle_action(cur, app=app, export=export)
         try:

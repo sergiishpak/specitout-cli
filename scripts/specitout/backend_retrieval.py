@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import re
+
 from collections.abc import Callable, Mapping
 from datetime import date, datetime
 from typing import Any
 
+from bubble_context_pack_internal.source_paths import ROOT_ALIASES, enrich_payload_source_paths
 from specitout.backend_exact_answers import exact_search_answer
 from specitout.backend_status import resolve_export_scope
 from specitout.embedding_provider import EmbeddingProvider
 from specitout.runtime import SpecItOutRuntimeError
+from specitout.retrieval_candidates import annotate_name_hints, canonical_candidates, requests_deprecated
 
 FetchOne = Callable[[str, Mapping[str, object] | None], dict[str, object] | None]
 GetApplication = Callable[[str], dict[str, object] | None]
@@ -25,22 +29,25 @@ def query_search(
     limit: int,
     embedding_provider: EmbeddingProvider | None = None,
 ) -> dict[str, object]:
-    resolved_export_id = _resolve_export_id(
+    export = _resolve_export(
         fetch_one=fetch_one,
         get_application=get_application,
         app_slug=app_slug,
         version_label=version_label,
         export_id=export_id,
     )
-    exact_answer = exact_search_answer(
+    resolved_export_id = str(export["id"])
+    exact_answer = None if requests_deprecated(query_text) else exact_search_answer(
         fetch_one=fetch_one,
         app_slug=app_slug,
         export_id=resolved_export_id,
         query_text=query_text,
     )
     if exact_answer is not None:
-        return exact_answer
-    query_embedding, embedding_warnings = _query_embedding(query_text, embedding_provider)
+        return _with_scope(exact_answer, export, fetch_one=fetch_one, version_label=version_label, explicit_export_id=export_id)
+    query_embedding, embedding_warnings = _scoped_query_embedding(
+        fetch_one, app_slug, export, query_text, embedding_provider,
+    )
     payload = _fetch_jsonb(
         fetch_one,
         """
@@ -58,17 +65,37 @@ select specitout.search_entities(
             "app_slug": app_slug,
             "query_text": query_text,
             "mode": mode,
-            "limit": limit,
+            # The existing RPC caps document candidates at 25. Fetch that pool once
+            # so duplicates and name hints cannot exhaust a small entity limit.
+            "limit": 25,
             "export_id": resolved_export_id,
             "query_embedding": _vector_literal(query_embedding),
             "allow_archived_app": False,
         },
         "search_entities",
     )
+    documents = payload.get("results")
+    candidates = canonical_candidates(documents, query_text=query_text)
+    payload["results"] = candidates[:limit]
+    payload["candidate_document_limit"] = 25
+    payload["ranking_policy"] = (
+        "RPC relevance order; scores are unchanged." if requests_deprecated(query_text) else
+        "Exact name/key matches first, then names without deprecation hints; RPC relevance order within each tier and scores are unchanged."
+    )
+    payload["semantic_used"] = query_embedding is not None and any(
+        reason.get("type") == "semantic_similarity"
+        for candidate in payload["results"]
+        for document in candidate.get("matched_documents", [])
+        for reason in document.get("ranking_reasons", [])
+        if isinstance(reason, Mapping)
+    )
+    if len(candidates) < limit and isinstance(documents, list) and len(documents) >= 25:
+        payload["warnings"] = [*list(payload.get("warnings") or []),
+            f"Only {len(candidates)} unique entities found within the 25-document candidate cap; refine the query for more results."]
     if embedding_warnings:
         payload["warnings"] = [*list(payload.get("warnings") or []), *embedding_warnings]
         payload["degraded"] = True
-    return payload
+    return _with_scope(payload, export, fetch_one=fetch_one, version_label=version_label, explicit_export_id=export_id)
 
 
 def query_entity(
@@ -80,6 +107,13 @@ def query_entity(
     version_label: str | None,
     export_id: str | None,
 ) -> dict[str, object]:
+    export = _resolve_export(fetch_one=fetch_one, get_application=get_application,
+                             app_slug=app_slug, version_label=version_label, export_id=export_id)
+    payload = _fetch_entity(fetch_one, app_slug, entity_lookup, str(export["id"]))
+    return _with_scope(payload, export, fetch_one=fetch_one, version_label=version_label, explicit_export_id=export_id)
+
+
+def _fetch_entity(fetch_one: FetchOne, app_slug: str, entity_lookup: str, export_id: str) -> dict[str, object]:
     return _fetch_jsonb(
         fetch_one,
         """
@@ -93,13 +127,7 @@ select specitout.get_entity(
         {
             "app_slug": app_slug,
             "entity_lookup": entity_lookup,
-            "export_id": _resolve_export_id(
-                fetch_one=fetch_one,
-                get_application=get_application,
-                app_slug=app_slug,
-                version_label=version_label,
-                export_id=export_id,
-            ),
+            "export_id": export_id,
             "allow_archived_app": False,
         },
         "get_entity",
@@ -118,20 +146,15 @@ def query_usage(
     relation: str | None,
     limit: int,
 ) -> dict[str, object]:
-    entity_payload = query_entity(
-        fetch_one=fetch_one,
-        get_application=get_application,
-        app_slug=app_slug,
-        entity_lookup=entity_lookup,
-        version_label=version_label,
-        export_id=export_id,
-    )
+    export = _resolve_export(fetch_one=fetch_one, get_application=get_application,
+                             app_slug=app_slug, version_label=version_label, export_id=export_id)
+    entity_payload = _fetch_entity(fetch_one, app_slug, entity_lookup, str(export["id"]))
     _raise_if_target_lookup_failed(entity_payload, lookup=entity_lookup)
     entity = entity_payload.get("entity")
     if not isinstance(entity, Mapping) or not entity.get("entity_key"):
         raise SpecItOutRuntimeError(f"Entity lookup {entity_lookup} did not resolve to one entity.")
-    resolved_export_id = export_id or _string_or_none(entity_payload.get("resolved_export_id"))
-    return _fetch_jsonb(
+    resolved_export_id = str(export["id"])
+    payload = _fetch_jsonb(
         fetch_one,
         """
 select specitout.get_neighbors(
@@ -155,6 +178,7 @@ select specitout.get_neighbors(
         },
         "get_neighbors",
     )
+    return _with_scope(payload, export, fetch_one=fetch_one, version_label=version_label, explicit_export_id=export_id)
 
 
 def query_paths(
@@ -171,7 +195,9 @@ def query_paths(
     max_hops: int,
     max_paths: int,
 ) -> dict[str, object]:
-    return _fetch_jsonb(
+    export = _resolve_export(fetch_one=fetch_one, get_application=get_application,
+                             app_slug=app_slug, version_label=version_label, export_id=export_id)
+    payload = _fetch_jsonb(
         fetch_one,
         """
 select specitout.find_paths(
@@ -194,17 +220,12 @@ select specitout.find_paths(
             "relation": relation,
             "max_hops": max_hops,
             "max_paths": max_paths,
-            "export_id": _resolve_export_id(
-                fetch_one=fetch_one,
-                get_application=get_application,
-                app_slug=app_slug,
-                version_label=version_label,
-                export_id=export_id,
-            ),
+            "export_id": str(export["id"]),
             "allow_archived_app": False,
         },
         "find_paths",
     )
+    return _with_scope(payload, export, fetch_one=fetch_one, version_label=version_label, explicit_export_id=export_id)
 
 
 def build_context_bundle(
@@ -223,7 +244,11 @@ def build_context_bundle(
     edge_limit: int,
     embedding_provider: EmbeddingProvider | None = None,
 ) -> dict[str, object]:
-    query_embedding, embedding_warnings = _query_embedding(query_text, embedding_provider) if query_text else (None, [])
+    export = _resolve_export(fetch_one=fetch_one, get_application=get_application,
+                             app_slug=app_slug, version_label=version_label, export_id=export_id)
+    query_embedding, embedding_warnings = _scoped_query_embedding(
+        fetch_one, app_slug, export, query_text, embedding_provider,
+    ) if query_text else (None, [])
     payload = _fetch_jsonb(
         fetch_one,
         """
@@ -243,13 +268,7 @@ select specitout.build_context_bundle(
 """,
         {
             "app_slug": app_slug,
-            "export_id": _resolve_export_id(
-                fetch_one=fetch_one,
-                get_application=get_application,
-                app_slug=app_slug,
-                version_label=version_label,
-                export_id=export_id,
-            ),
+            "export_id": str(export["id"]),
             "query_text": query_text,
             "entity_key": entity_key,
             "mode": mode,
@@ -266,35 +285,119 @@ select specitout.build_context_bundle(
         payload["warnings"] = [*list(payload.get("warnings") or []), *embedding_warnings]
         payload["degraded"] = True
         payload["degraded_mode"] = True
-    return payload
+    if query_embedding is None:
+        payload["semantic_used"] = False
+    return _with_scope(payload, export, fetch_one=fetch_one, version_label=version_label, explicit_export_id=export_id)
 
 
-def _resolve_export_id(
+def _resolve_export(
     *,
     fetch_one: FetchOne,
     get_application: GetApplication,
     app_slug: str,
     version_label: str | None,
     export_id: str | None,
-) -> str | None:
+) -> dict[str, object]:
     if export_id is not None:
-        return export_id
-    if version_label is None:
-        return None
-    scope = resolve_export_scope(
-        fetch_one=fetch_one,
-        get_application=get_application,
-        app_slug=app_slug,
-        version_label=version_label,
-    )
+        app = get_application(app_slug)
+        if app is None:
+            raise SpecItOutRuntimeError(f"Unknown application scope {app_slug}.")
+        export = fetch_one(
+            "select id, version_label, readiness_status::text as readiness_status from specitout.exports "
+            "where id = %(export_id)s and app_id = %(app_id)s",
+            {"export_id": export_id, "app_id": app["id"]},
+        )
+        if export is None:
+            raise SpecItOutRuntimeError(f"Unknown export {export_id} for application scope {app_slug}.")
+        if version_label is not None and str(export["version_label"]) != version_label:
+            raise SpecItOutRuntimeError("Export ID and version label select different versions.")
+        return export
+    scope = resolve_export_scope(fetch_one=fetch_one, get_application=get_application,
+                                 app_slug=app_slug, version_label=version_label)
     export = scope["export"]
     if export is None:
         raise SpecItOutRuntimeError(f"Unknown export version {version_label} for application scope {app_slug}.")
-    return str(export["id"])
+    return export
 
 
-def _string_or_none(value: object) -> str | None:
-    return str(value) if value is not None else None
+def _with_scope(payload: dict[str, object], export: Mapping[str, object], *, fetch_one: FetchOne,
+                version_label: str | None, explicit_export_id: str | None) -> dict[str, object]:
+    payload["resolved_export_id"] = str(export["id"])
+    payload["version_label"] = str(export["version_label"])
+    payload["export_selection_reason"] = "explicit_export" if explicit_export_id else "explicit_version" if version_label else "active_export"
+    if annotate_name_hints(payload):
+        payload["warnings"] = [*list(payload.get("warnings") or []),
+            "Deprecation hints come from entity names only; they do not establish runtime inactivity. Question marks indicate uncertainty in the name."]
+    aliases = _source_root_aliases(fetch_one, str(export["id"]), payload)
+    return enrich_payload_source_paths(payload, root_aliases=aliases)
+
+
+def _source_root_aliases(fetch_one: FetchOne, export_id: str, payload: Mapping[str, object]) -> dict[str, str]:
+    root_paths: set[str] = set()
+    pattern = re.compile(r"(?:%p3|%ed|pages|element_definitions|mobile_views)\.[^.;|\s,]+")
+
+    def collect(value: object) -> None:
+        if isinstance(value, str):
+            root_paths.update(match.group() for match in pattern.finditer(value))
+        elif isinstance(value, list):
+            for item in value:
+                collect(item)
+        elif isinstance(value, Mapping):
+            for key, item in value.items():
+                if key not in {"normalized_payload", "_raw", "raw_fragment", "source_excerpt"} and not key.endswith("_alias"):
+                    collect(item)
+
+    collect(payload)
+    if not root_paths:
+        return {}
+    row = fetch_one(
+        """
+select coalesce(jsonb_agg(jsonb_build_object(
+  'source_path', source_path,
+  'source_id', source_id,
+  'source_domain', coalesce(nullif(structural_json ->> 'source_domain', ''),
+    case entity_type when 'page' then 'pages' when 'component' then 'element_definitions' when 'mobile_view' then 'mobile_views' end),
+  'source_key', structural_json ->> 'source_key'
+)), '[]'::jsonb) as source_root_entities
+from specitout.entities
+where export_id = %(export_id)s
+  and entity_type in ('page', 'component', 'mobile_view')
+  and (source_path = any(%(root_paths)s::text[])
+    or source_id = any(%(root_ids)s::text[])
+    or structural_json ->> 'source_key' = any(%(root_ids)s::text[]))
+""",
+        {"export_id": export_id, "root_paths": sorted(root_paths),
+         "root_ids": sorted({path.split('.', 1)[1] for path in root_paths})},
+    )
+    aliases: dict[str, str] = {}
+    for root in (row or {}).get("source_root_entities") or []:
+        domain, key = root.get("source_domain"), root.get("source_key")
+        if domain not in {"pages", "element_definitions", "mobile_views"} or key is None:
+            continue
+        canonical = f"{domain}.{key}"
+        if root.get("source_path"):
+            aliases[str(root["source_path"])] = canonical
+        prefixes = [domain, *(alias for alias, target in ROOT_ALIASES.items() if target == domain)]
+        for prefix in prefixes:
+            for identifier in (root.get("source_id"), key):
+                if identifier is not None:
+                    aliases[f"{prefix}.{identifier}"] = canonical
+    return aliases
+
+
+def _scoped_query_embedding(fetch_one: FetchOne, app_slug: str, export: Mapping[str, object],
+                            query_text: str, embedding_provider: EmbeddingProvider | None) -> tuple[list[float] | None, list[str]]:
+    if embedding_provider is None:
+        return None, []
+    if export.get("readiness_status") not in {"ready", "degraded"}:
+        return None, ["Semantic search unavailable for this export readiness; using lexical search without loading the embedding model."]
+    scope = fetch_one(
+        "select semantic_available from specitout.resolve_retrieval_scope(%(app_slug)s, %(export_id)s)",
+        {"app_slug": app_slug, "export_id": str(export["id"])},
+    )
+    if not scope or not scope.get("semantic_available"):
+        return None, ["No indexed semantic vectors available; using lexical search without loading the embedding model."]
+    return _query_embedding(query_text, embedding_provider)
 
 
 def _query_embedding(query_text: str, embedding_provider: EmbeddingProvider | None) -> tuple[list[float] | None, list[str]]:

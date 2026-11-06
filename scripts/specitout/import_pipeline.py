@@ -7,7 +7,8 @@ from bubble_ingestion.compact_evidence import EVIDENCE_LOCATION_LOCAL_ONLY, LOCA
 from bubble_ingestion.ingestion_runs import record_phase, record_phase_checkpoint
 from bubble_ingestion.pipeline_runs import start_pipeline_run, update_pipeline_run
 from specitout.import_graph import build_normalized_import_graph
-from specitout.progress import ImportProgressReporter
+from specitout.progress import ImportProgressReporter, progress_scope
+from specitout.backend_writes import prepare_rows_for_upsert
 
 IMPORT_PIPELINE_KIND = "specitout_import"
 IMPORT_MODE = "append_new_version"
@@ -191,7 +192,7 @@ def start_initial_import_pipeline(
             pipeline_run=pipeline_run,
             current_stage="parse_export_payload",
             stage_index=3,
-            status_message="parsed raw bubble export payload",
+            status_message="waiting to parse raw bubble export payload",
         )
         record_phase_checkpoint(
             backend,
@@ -202,7 +203,7 @@ def start_initial_import_pipeline(
             progress_current=3,
             progress_total=len(PIPELINE_STAGES),
             progress_unit="stage",
-            status_message="parsed raw bubble export payload",
+            status_message="waiting to parse raw bubble export payload",
             current_item_key=f"export:{export_id}",
             stats_json={"source_export_hash": source_export_hash},
         )
@@ -213,7 +214,7 @@ def start_initial_import_pipeline(
             pipeline_run=pipeline_run,
             current_stage="context_pack_build",
             stage_index=4,
-            status_message="built temporary context pack",
+            status_message="building temporary context pack",
         )
         graph = build_normalized_import_graph(
             export_id=export_id,
@@ -221,6 +222,7 @@ def start_initial_import_pipeline(
             version_label=str(export["version_label"]),
             export_path=export_path,
             source_export_hash=source_export_hash,
+            progress_reporter=progress_reporter,
         )
 
         _report_progress(progress_reporter, "graph_normalization", 5, total_stages, "normalizing graph rows")
@@ -247,7 +249,9 @@ def start_initial_import_pipeline(
         )
 
         for table in GRAPH_TABLES:
-            backend.delete_export_scoped_rows(table, export_id)
+            _report_progress(progress_reporter, "graph_load.clear", 0, 0, f"clearing prior {table} rows; unit=rows count=unknown")
+            with progress_scope(progress_reporter):
+                backend.delete_export_scoped_rows(table, export_id)
 
         _report_progress(progress_reporter, "graph_load", 6, total_stages, "loading normalized graph rows")
         pipeline_run = update_pipeline_run(
@@ -255,7 +259,7 @@ def start_initial_import_pipeline(
             pipeline_run=pipeline_run,
             current_stage="graph_load",
             stage_index=6,
-            status_message="loaded normalized graph rows",
+            status_message="loading normalized graph rows",
         )
         for table, rows in (
             ("entities", graph.entities),
@@ -265,8 +269,11 @@ def start_initial_import_pipeline(
             ("public_api_workflow_index", graph.public_api_workflow_index),
             ("permission_surface_index", graph.permission_surface_index),
         ):
-            _report_progress(progress_reporter, "graph_load", 6, total_stages, f"loading {table} rows")
-            backend.upsert_rows(table, rows)
+            rows = prepare_rows_for_upsert(table, rows)
+            _report_progress(progress_reporter, f"graph_load.{table}", 0, len(rows), f"loading {len(rows)} {table} rows; unit=rows")
+            with progress_scope(progress_reporter):
+                backend.upsert_rows(table, rows)
+            _report_progress(progress_reporter, f"graph_load.{table}", len(rows), len(rows), f"loaded {len(rows)} {table} rows; unit=rows")
         record_phase(
             backend,
             export_id=export_id,
@@ -343,4 +350,4 @@ def _report_progress(
     message: str,
 ) -> None:
     if progress_reporter is not None:
-        progress_reporter(stage, current, total, message)
+        progress_reporter(stage, current, total, f"{message}; unit=import_stages" if stage in PIPELINE_STAGES else message)

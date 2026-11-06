@@ -1264,20 +1264,25 @@ wheels = [
 
 [[package]]
 name = "specitout-cli"
-version = "0.1.0"
+version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "psycopg", extra = ["binary"] },
-    { name = "pytest" },
     { name = "sentence-transformers" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4" },
-    { name = "pytest", specifier = ">=8,<9" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8,<9" },
     { name = "sentence-transformers", specifier = ">=3,<4" },
 ]
+provides-extras = ["dev"]
 
 [[package]]
 name = "sympy"

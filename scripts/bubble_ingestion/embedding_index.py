@@ -370,6 +370,8 @@ def build_embeddings_with_backend(
         embedded_documents = 0
         embedding_model = None
         embedding_dimensions = None
+        if progress_reporter is not None:
+            progress_reporter(EMBEDDING_PHASE, 0, progress_total, f"starting embedding pass; unit=pass_documents; overall_embedded={total_documents - pending_documents} overall_remaining={pending_documents} overall_total={total_documents}")
         if progress_total:
             config = None if embedding_provider is not None else _load_config_from_env()
             batch_size = embedding_provider.batch_size if embedding_provider is not None else config.batch_size
@@ -382,6 +384,8 @@ def build_embeddings_with_backend(
                 )
                 if not batch:
                     break
+                if progress_reporter is not None:
+                    progress_reporter(EMBEDDING_PHASE, embedded_documents, progress_total, f"processing next batch of {len(batch)} documents; unit=pass_documents; overall_committed={total_documents - pending_documents + embedded_documents}/{total_documents}")
                 texts = [_embedding_source_text(row) for row in batch]
                 if embedding_provider is not None:
                     embeddings = embedding_provider.embed_documents(texts)
@@ -419,7 +423,7 @@ def build_embeddings_with_backend(
                         EMBEDDING_PHASE,
                         embedded_documents,
                         progress_total,
-                        f"embedded {embedded_documents}/{progress_total} search documents",
+                        f"committed {embedded_documents}/{progress_total} embeddings this pass; unit=pass_documents; overall_committed={total_documents - pending_documents + embedded_documents}/{total_documents}",
                     )
                 record_phase_checkpoint(
                     backend,
@@ -449,6 +453,8 @@ def build_embeddings_with_backend(
             "embedding_dimensions": embedding_dimensions,
         }
 
+        if progress_reporter is not None:
+            progress_reporter("embedding_verification", 0, 0, "waiting for final database embedding counts and readiness update")
         remaining_documents = _count_pending_search_document_embeddings(backend, export_id=export_id)
         if remaining_documents == 0:
             export = backend.update_export(export_id, readiness_status="ready", failure_reason=None)

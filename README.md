@@ -1,84 +1,118 @@
 # SpecItOut CLI
 
-SpecItOut is a local-first Python CLI and ingestion pipeline for making a
-complex Bubble application export inspectable by a developer or coding agent.
-It turns structural application information into explicit entities,
-relationships, source evidence, search documents, and bounded context bundles.
+Understand a Bubble application through its export. SpecItOut turns a private
+export into searchable entities, relationships and source evidence so your coding
+agent can investigate dependencies and explain what the exported app contains.
 
-The point is not to paste a huge export into an LLM context window. The point
-is to let a question retrieve the relevant structural evidence: an exact
-identifier, lexical matches, semantic matches, connected entities, and the
-source fragments that support an answer.
+Use it when you are taking over an unfamiliar app, tracing a workflow, assessing
+a proposed change, or preparing a migration. The CLI retrieves evidence; your
+agent’s LLM writes the answer.
 
-## What this repository demonstrates
+## Start with your agent
 
-- Export-oriented analysis rather than manual page-by-page reconstruction.
-- A normalized application model with entities, edges, source evidence, and
-  explicit relationship traversal.
-- Exact, lexical, and semantic retrieval as complementary tools, rather than a
-  vector-only system.
-- Bounded context bundles so an agent receives relevant evidence instead of an
-  uncontrolled export dump.
-- A local, app-owned Postgres runtime and CLI surface suitable for agent tools
-  or human investigation.
+Give your coding agent this repository URL and paste:
 
-This is a technical demonstration of the approach and implementation. It is
-not a hosted service, a guarantee that every Bubble export imports without
-adaptation, or a claim that autonomous agents should modify application truth.
+> Install SpecItOut and its analysis skill from this repository. Set up a private
+> workspace for my Bubble application, then ask me for the local export path.
+> Process the export with progress updates and verify readiness before answering
+> questions about it.
 
-## Architecture
+The agent follows the [setup guide](docs/agent-setup.md), installs the CLI and
+bundled skill from the same Git revision, and creates a separate private folder
+for your app. Git is not required in that folder. One CLI installation can serve
+several workspaces.
+
+**Version:** 0.2.1. Install from an explicit repository commit using the setup
+guide; a package-index release is not assumed.
+The initial native-runtime target is macOS or Linux as a non-root user, with
+Python 3.11+, Postgres, pgvector and sentence-transformers. Native Windows,
+Docker and hosted databases are outside this onboarding path. See the setup
+guide for prerequisites and validation limits.
+
+## Prepare the export locally
+
+![Local processing: validate an export, normalize structure, store a graph, build search documents, compute embeddings, and verify readiness. Initial model download is separate from per-export computation.](docs/assets/local-processing.svg)
+
+The Python CLI parses the export, stores a versioned application graph in local
+Postgres, builds search documents, and computes local embeddings with
+sentence-transformers and `BAAI/bge-small-en-v1.5`. The diagram shows a CPU
+onboarding profile; the provider otherwise selects its device automatically.
+An initial model download is separate from work on each export. Processing time
+is unbenchmarked: use measured elapsed time and counts, not a promised duration.
+
+[Processing stages, storage and limitations →](docs/architecture.md)
+
+## Ask questions with evidence
+
+![Answering flow: your question goes to an agent; the local CLI combines exact, lexical and vector retrieval with graph traversal; bounded source evidence returns to the agent’s LLM for a cited answer.](docs/assets/evidence-answering.svg)
+
+This is **retrieval-augmented generation (RAG)**: the CLI retrieves evidence,
+then the agent generates an answer grounded in that evidence.
+
+Exact identifiers, lexical matches and vector similarity help find an anchor.
+Graph traversal then exposes connected entities. A bounded bundle gives the
+agent relevant evidence and explicit limits without loading the entire export
+into the conversation. The CLI computes locally; **a hosted agent’s LLM can
+receive retrieved application evidence** under that agent provider’s data
+handling.
+
+Try questions such as:
+
+- “Where is this field referenced, and which connected actions may write it?”
+- “What uses this workflow, and what does it depend on?”
+- “Which pages are connected to this reusable element?”
+- “What paths connect these two entities?”
+- “Collect the evidence relevant to moving this workflow out of Bubble.”
+
+These questions map to search, entity lookup, usage, paths and context bundles.
+The answer depends on what the parser extracted and what the selected version
+contains. Business intent, runtime execution and behavior missing from the
+export require additional evidence.
+
+An answer should look like this **synthetic illustration**, not a claim about a
+real application or a literal CLI response:
+
+> **Observed:** `approve_order` references `Order.status` through action
+> `set_status`. [1]
+>
+> **Interpretation:** This may be part of order approval. The export alone does
+> not establish the business policy or prove that this path runs in production.
+>
+> **Source:** [1] export version `demo-v1`, action `set_status`, source path
+> `$.workflows.approve_order.actions.set_status`.
+>
+> **Limit:** This conclusion covers the retrieved references; check bundle
+> truncation and unresolved references before claiming completeness.
+
+The source reference lets a reviewer return to the stable export version.
+The separation between observation and interpretation makes the conclusion
+reviewable.
+
+## Workspaces and removal
 
 ```text
-Bubble export
-    -> source bundle and normalization
-    -> entities + relationships + source evidence
-    -> Postgres / pgvector search surfaces
-    -> exact, lexical, semantic, and bounded graph retrieval
-    -> CLI response for a human or coding agent
+my-bubble-app/               private folder; no Git required
+  specitout.toml             app identity
+  exports/                  stable, versioned copies of your exports
+  .specitout/               database files, model cache and runtime state
+  reports/                  optional requested analysis outputs
 ```
 
-The source evidence remains important. Semantic search helps locate relevant
-material; it does not replace the application's actual structure or invent a
-business rule.
+Importing preserves your original file. Uninstalling the CLI preserves private
+workspaces. Stopping the database, removing the skill and deleting a workspace
+are separate actions. Folder separation is organizational: the native localhost
+Postgres runtime uses trust authentication and is not a security boundary
+against other local users or processes.
 
-## Local use
+- [Usage, command examples and recovery](docs/usage.md)
+- [Uninstall and data lifecycle](docs/uninstall.md)
+- [Agent installation guide](docs/agent-setup.md)
+- [Versions, changelog and release process](docs/releases.md) · [Changelog](CHANGELOG.md)
+- [Validation performed and remaining acceptance checks](docs/validation.md)
+- [Public data policy](PUBLIC_DATA_POLICY.md)
 
-Requirements: Python 3.11+, Postgres with pgvector, and `uv`.
-
-```bash
-uv sync
-uv run specitout --help
-```
-
-The runtime is local and expects a controlled Postgres environment. See the
-CLI help and runtime migration files for the commands and schema ownership.
-Use your own export from an ignored local path; do not commit it.
-
-`examples/fictional-operations-app.json` is intentionally fictional and small.
-It exists to show the kind of domain complexity the model preserves—roles,
-workflow rules, states, relationships, and conditional UI—not to represent a
-complete Bubble export.
-
-## Agent use
-
-An agent should use this system to investigate evidence, not to silently write
-company facts. A good request is narrow: identify the workflows that write a
-field, trace a page to a backend action, or assemble a bounded context bundle
-for a migration task. Important conclusions should retain source references and
-remain reviewable by a human.
-
-## Publication and data boundary
-
-This repository contains no client exports or derived client artifacts. The
-rules are in [PUBLIC_DATA_POLICY.md](PUBLIC_DATA_POLICY.md).
-
-Before publishing any update, run:
-
-```bash
-git grep -n -i -E 'AIza[0-9A-Za-z_-]{35}|sk-(proj-)?[A-Za-z0-9_-]{20,}'
-git fsck --full
-python -m unittest discover -s tests -v
-```
-
-Run a dedicated secret scanner in CI as well. The local checks complement; they
-do not replace, an all-history secret scan before a release.
+The CLI analyzes exports; it does not edit or execute your live Bubble app.
+This repository ships no Bubble exports or client-derived artifacts. A private
+real-export acceptance run has completed locally; the [validation notes](docs/validation.md)
+describe its coverage, verified corrections and remaining limits. One successful export does
+not establish support for every Bubble export.

@@ -49,6 +49,7 @@ def run_index_rebuild_pipeline(
     try:
         _report_progress(progress_reporter, "search_document_generation", 1, len(INDEX_REBUILD_STAGES), "building search documents")
         if str(export.get("readiness_status") or "") == "embedding_pending":
+            _report_progress(progress_reporter, "search_document_generation", 1, len(INDEX_REBUILD_STAGES), "reusing committed search documents for embedding resume")
             search_summary = {
                 "app_id": app["id"],
                 "export_id": export["id"],
@@ -127,4 +128,4 @@ def _report_progress(
     message: str,
 ) -> None:
     if progress_reporter is not None:
-        progress_reporter(stage, current, total, message)
+        progress_reporter(stage, current, total, f"{message}; unit=index_stages")

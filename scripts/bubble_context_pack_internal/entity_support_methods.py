@@ -249,11 +249,11 @@ def register_virtual_nodes_from_index(self):
 def classify_virtual_entity_type(self, path):
     if ".actions." in path:
         return "workflow_action"
-    if ".%wf." in path:
+    if ".%wf." in path or ".workflows." in path:
         return "ui_workflow"
-    if path.startswith("%p3."):
+    if path.startswith(("%p3.", "pages.")):
         return "page_node"
-    if path.startswith("%ed."):
+    if path.startswith(("%ed.", "element_definitions.")):
         return "component_node"
     if path.startswith("mobile_views."):
         return "mobile_view_node"

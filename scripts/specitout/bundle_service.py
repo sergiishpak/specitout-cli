@@ -61,6 +61,7 @@ class BundleService:
             "scope": {
                 "app_slug": app_slug,
                 "version_label": str(resolved_version) if resolved_version else None,
+                "export_id": str(result["resolved_export_id"]) if result.get("resolved_export_id") else None,
             },
             "data": {
                 "state": state,
@@ -115,6 +116,7 @@ def _normalize_anchors(value: object) -> list[dict[str, object]]:
                 "canonical_name": _first_present(item, "canonical_name", "display_name", "name"),
                 "match_type": _first_present(item, "resolution_reason", "anchor_kind", "match_type"),
                 "evidence": _anchor_evidence(item),
+                "name_hints": list(item.get("name_hints") or []),
             }
         )
     return anchors
@@ -137,6 +139,7 @@ def _normalize_entity(item: dict[str, object]) -> dict[str, object]:
         "entity_type": _first_present(item, "entity_type", "type"),
         "canonical_name": _first_present(item, "canonical_name", "display_name", "name"),
         "summary": item.get("summary"),
+        "name_hints": list(item.get("name_hints") or []),
     }
 
 

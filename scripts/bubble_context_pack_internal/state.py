@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from .overlay import OverlayManager
+from .source_paths import canonical_index_paths
 from .shared import load_json, now_iso, write_json, write_jsonl, write_text
 
 
@@ -83,5 +84,5 @@ def make_initial_state(data, overlay_manager):
         settings_client_safe=settings.get("client_safe", {}),
         settings_secure=settings.get("secure", {}),
         overlay_manager=overlay_manager,
-        id_to_path=data.get("_index", {}).get("id_to_path", {}),
+        id_to_path=canonical_index_paths(data),
     )

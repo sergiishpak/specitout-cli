@@ -159,12 +159,6 @@ def derive_display_name(self, domain, source_key, raw):
 
 
 def derive_source_path(self, domain, source_key, source_id):
-    if source_id in self.id_to_path:
-        return self.id_to_path[source_id]
-    if domain == "pages":
-        return f"%p3.{source_id}"
-    if domain == "element_definitions":
-        return f"%ed.{source_id}"
     return f"{domain}.{source_key}"
 
 

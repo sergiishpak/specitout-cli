@@ -4,6 +4,7 @@ import os
 from collections.abc import Callable, Sequence
 from typing import Protocol
 
+from specitout.progress import timed_reporter
 from specitout.runtime import SpecItOutRuntimeError
 from specitout.runtime_paths import resolve_embedding_cache_dir
 
@@ -88,14 +89,18 @@ class SentenceTransformerEmbeddingProvider:
     def _load_model(self) -> _SentenceTransformerModel:
         if self._model is not None:
             return self._model
-        if self._model_factory is None:
-            self._model_factory = _load_sentence_transformer_factory()
-        kwargs: dict[str, object] = {}
-        if self._device:
-            kwargs["device"] = self._device
-        if self._cache_folder:
-            kwargs["cache_folder"] = self._cache_folder
-        self._model = self._model_factory(self.model_name, **kwargs)
+        with timed_reporter("embedding model") as report:
+            if self._model_factory is None:
+                report("loading_library", 0, 0, "loading local embedding library; first startup may take time")
+                self._model_factory = _load_sentence_transformer_factory()
+            kwargs: dict[str, object] = {}
+            if self._device:
+                kwargs["device"] = self._device
+            if self._cache_folder:
+                kwargs["cache_folder"] = self._cache_folder
+            report("loading_model", 0, 0, f"loading local embedding model {self.model_name}; first use may download model weights into {self._cache_folder or 'the model cache'}")
+            self._model = self._model_factory(self.model_name, **kwargs)
+            report("model_ready", 0, 0, "local embedding model ready")
         return self._model
 
 

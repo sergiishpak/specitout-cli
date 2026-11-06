@@ -35,7 +35,7 @@ def start_pipeline_run(
         "started_at": _utc_now_iso(),
         "finished_at": None,
         "last_heartbeat_at": _utc_now_iso(),
-        "summary_json": summary_json or {},
+        "summary_json": {**(summary_json or {}), "progress_basis": "stages"},
         "error_json": {},
     }
     backend.upsert_rows("pipeline_runs", [row])
@@ -66,6 +66,7 @@ def update_pipeline_run(
         summary_json = dict(updated.get("summary_json") or {})
         summary_json.update(summary_updates)
         updated["summary_json"] = summary_json
+    updated["summary_json"] = {**dict(updated.get("summary_json") or {}), "progress_basis": "stages"}
     if error_json is not None:
         updated["error_json"] = error_json
     backend.upsert_rows("pipeline_runs", [updated])

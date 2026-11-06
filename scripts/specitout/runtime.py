@@ -36,6 +36,9 @@ class AppOwnedPostgresRuntime:
         self._env = os.environ
 
     def ensure_ready(self) -> RuntimeStatus:
+        from specitout.workspace import READ_ONLY_RUNTIME
+        if READ_ONLY_RUNTIME.get():
+            return self._inspect_running()
         binaries = self._resolve_binaries()
         data_root = self._resolve_data_root()
         cluster_dir = data_root / "postgres" / "data"
@@ -113,6 +116,30 @@ class AppOwnedPostgresRuntime:
         metadata_path.write_text(json.dumps(asdict(status), indent=2) + "\n")
         return status
 
+    def _inspect_running(self) -> RuntimeStatus:
+        """Connect for monitoring during processing without bootstrap or migration writes."""
+        root = self._resolve_data_root()
+        metadata = self._load_metadata(root / "postgres" / "runtime.json")
+        binaries = self._resolve_binaries()
+        cluster = root / "postgres" / "data"
+        port = metadata.get("port")
+        if metadata.get("state") != "ready" or not isinstance(port, int) or not self._cluster_server_ready(binaries["pg_ctl"], binaries["psql"], cluster, port):
+            raise SpecItOutRuntimeError("Runtime bootstrap is still in progress; retry status after it finishes.")
+        return RuntimeStatus(state="ready", data_root=str(root), bootstrap_action="reused", server_action="already-running", migrations="previously-applied", extensions="previously-verified", database=DEFAULT_DATABASE, port=port)
+
+    def stop(self) -> dict[str, object]:
+        data_root = self._resolve_data_root()
+        cluster_dir = data_root / "postgres" / "data"
+        if not (cluster_dir / "PG_VERSION").is_file():
+            return {"state": "not_initialized", "data_root": str(data_root)}
+        binary = self._resolve_binary("pg_ctl", self._env.get("SPECITOUT_POSTGRES_BIN_DIR"))
+        if binary is None:
+            raise SpecItOutRuntimeError("Missing pg_ctl; configure SPECITOUT_POSTGRES_BIN_DIR to stop this runtime.")
+        if not self._pg_ctl_reports_running(binary, cluster_dir):
+            return {"state": "not_running", "data_root": str(data_root)}
+        self._run_command([binary, "-D", str(cluster_dir), "stop", "-m", "fast"], "stop selected Postgres runtime")
+        return {"state": "stopped", "data_root": str(data_root)}
+
     def _resolve_binaries(self) -> dict[str, str]:
         postgres_bin_dir = self._env.get("SPECITOUT_POSTGRES_BIN_DIR")
         binaries = {
@@ -133,7 +160,7 @@ class AppOwnedPostgresRuntime:
     def _resolve_binary(self, name: str, postgres_bin_dir: str | None) -> str | None:
         if postgres_bin_dir:
             candidate = Path(postgres_bin_dir) / name
-            if candidate.is_file():
+            if candidate.is_file() and os.access(candidate, os.X_OK):
                 return str(candidate)
             return None
         return shutil.which(name)

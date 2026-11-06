@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import importlib.metadata
+import json
+import os
+import traceback
+from pathlib import Path
 import sys
 from collections.abc import Callable, Sequence
 
@@ -12,12 +18,17 @@ from specitout.json_rendering import render_json_envelope
 from specitout.rendering import coerce_exit_code, render_envelope
 from specitout.runtime import SpecItOutRuntimeError
 from specitout.services import CliServices, build_cli_services
+from specitout.workspace import READ_ONLY_RUNTIME, WorkspaceBusyError, operation_lock, select_project
+from specitout.runtime_paths import resolve_app_data_root
 
 BackendFactory = Callable[[], LocalBackendProtocol]
 ServicesFactory = Callable[[], CliServices]
 
 
 class RootParser(argparse.ArgumentParser):
+    def error(self, message):
+        raise SpecItOutRuntimeError(message)
+
     def format_help(self) -> str:
         if self.prog != "specitout":
             return super().format_help()
@@ -27,7 +38,10 @@ class RootParser(argparse.ArgumentParser):
             "Usage:",
             "  specitout <command> <subcommand> [arguments] [flags]",
             "",
+            "Options: --project PATH  --format {text,json}  --version",
+            "",
             "Command groups:",
+            "  doctor     Check prerequisites without starting the database",
         ]
         for group in iter_root_groups():
             lines.append(f"  {group.name:<11}{group.help}")
@@ -45,11 +59,18 @@ class RootParser(argparse.ArgumentParser):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = RootParser(prog="specitout")
+    parser.add_argument("--project", help="Private workspace path; defaults to discovery from current folder")
+    parser.add_argument("--version", action="version", version=importlib.metadata.version("specitout-cli"))
+    parser.add_argument("--format", dest="output_format", choices=("text", "json"), default="text")
     subparsers = parser.add_subparsers(dest="command")
 
     for group in COMMAND_GROUPS:
         _add_group_parser(subparsers, group)
 
+    doctor_parser = subparsers.add_parser("doctor", help="Check prerequisites without starting the database")
+    doctor_parser.add_argument("--format", dest="output_format", choices=("text", "json"), default=argparse.SUPPRESS)
+    from specitout.onboarding import doctor
+    doctor_parser.set_defaults(handler=doctor, command_path="doctor")
     help_parser = subparsers.add_parser("help", help=HELP_GROUP.help, description=HELP_GROUP.description)
     help_parser.add_argument("topic", nargs="*")
     help_parser.set_defaults(handler=_handle_help_command)
@@ -65,6 +86,9 @@ def main(
     args_list = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
     resolved_services_factory = services_factory or _make_services_factory(backend_factory)
+    args = None
+    services = None
+    runtime_root = None
     try:
         args = parser.parse_args(args_list)
         handler = getattr(args, "handler", None)
@@ -72,13 +96,61 @@ def main(
             services = resolved_services_factory()
             print(services.help.render_root(), end="")
             return 0
-        services = resolved_services_factory()
-        return int(handler(args, parser, services))
-    except SpecItOutRuntimeError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
+        with select_project(getattr(args, "project", None)) as project:
+            if project and getattr(args, "command_path", "") != "project init" and hasattr(args, "app_slug"):
+                if args.app_slug and args.app_slug != project.app_slug:
+                    raise SpecItOutRuntimeError("Application scope conflicts with selected workspace.")
+                args.app_slug = project.app_slug
+            if getattr(args, "requires_app", False) and not getattr(args, "app_slug", None):
+                raise SpecItOutRuntimeError("Provide --app or select a workspace with --project PATH.")
+            services = resolved_services_factory()
+            runtime_root = resolve_app_data_root()
+            passive = getattr(args, "command", None) in {"help", "doctor", "project"} or not getattr(args, "command_path", None)
+            lock = contextlib.nullcontext() if passive else operation_lock(resolve_app_data_root())
+            try:
+                with lock:
+                    return int(handler(args, parser, services))
+            except WorkspaceBusyError:
+                read_commands = {"app list", "app show", "import list", "import status", "index status", "query search", "query entity", "query usage", "query paths", "bundle build"}
+                if getattr(args, "command_path", None) not in read_commands:
+                    raise
+                token = READ_ONLY_RUNTIME.set(True)
+                try:
+                    return int(handler(args, parser, services))
+                finally:
+                    READ_ONLY_RUNTIME.reset(token)
+    except (SpecItOutRuntimeError, OSError, ValueError) as exc:
+        return _render_failure(str(exc), args, args_list)
+    except Exception as exc:
+        message = f"Command failed ({type(exc).__name__}); inspect private import/index status before retrying."
+        if runtime_root is not None:
+            try:
+                log = runtime_root / "logs" / "cli-errors.log"
+                log.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                descriptor = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+                with os.fdopen(descriptor, "w") as stream:
+                    traceback.print_exc(file=stream)
+                message += f" Private diagnostic: {log}"
+            except OSError:
+                pass
+        return _render_failure(message, args, args_list)
+    except KeyboardInterrupt:
+        print("Interrupted; inspect import status and resume incomplete work.", file=sys.stderr)
+        return 130
     except SystemExit as exc:
         return coerce_exit_code(exc.code)
+    finally:
+        if services is not None and hasattr(services, "close_progress_reporters"):
+            services.close_progress_reporters()
+
+
+def _render_failure(message, args, args_list):
+    wants_json = getattr(args, "output_format", None) == "json" if args is not None else "--format=json" in args_list or any(a == "--format" and i + 1 < len(args_list) and args_list[i+1] == "json" for i, a in enumerate(args_list))
+    if wants_json:
+        print(json.dumps({"status": "error", "command": getattr(args, "command_path", None) or getattr(args, "command", None) or "parse", "error": message, "data": {}, "scope": {"app_slug": getattr(args, "app_slug", None), "version_label": getattr(args, "version_label", None)}, "warnings": [], "degraded": True, "next_actions": []}))
+    else:
+        print(message, file=sys.stderr)
+    return 1
 
 
 def _add_group_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser], group: GroupSpec) -> None:
@@ -101,8 +173,17 @@ def _add_command_parser(
     command: CommandSpec,
 ) -> None:
     command_parser = subparsers.add_parser(command.name, help=command.help, description=command.description)
+    requires_app = False
     for argument in command.arguments:
-        command_parser.add_argument(*argument.flags, **argument.kwargs)
+        kwargs = dict(argument.kwargs)
+        if argument.flags == ("--app",) and command.handler_key != "project_init":
+            requires_app = bool(kwargs.pop("required", False))
+        if argument.flags == ("--format",):
+            kwargs["default"] = argparse.SUPPRESS
+        command_parser.add_argument(*argument.flags, **kwargs)
+    if not any(argument.flags == ("--format",) for argument in command.arguments):
+        command_parser.add_argument("--format", dest="output_format", choices=("text", "json"), default=argparse.SUPPRESS)
+    command_parser.set_defaults(requires_app=requires_app)
     command_parser.set_defaults(handler=_resolve_handler(command.handler_key), command_path=f"{group.name} {command.name}")
 
 
@@ -111,7 +192,10 @@ def _make_services_factory(backend_factory: BackendFactory) -> ServicesFactory:
 
 
 def _resolve_handler(handler_key: str) -> Callable[[argparse.Namespace, argparse.ArgumentParser, CliServices], int]:
+    from specitout.onboarding import project_init, runtime_stop
     handlers = {
+        "project_init": project_init,
+        "runtime_stop": runtime_stop,
         "app_show": _handle_app_show,
         "import_status": _handle_import_status,
         "import_retry": _handle_import_retry,
@@ -155,7 +239,7 @@ def _handle_index_status(
         app_slug=getattr(args, "app_slug", None),
         version_label=getattr(args, "version_label", None),
     )
-    print(render_envelope(envelope), end="")
+    _print_envelope(envelope, args)
     return 0
 
 
@@ -170,7 +254,7 @@ def _handle_index_rebuild(
         version_label=getattr(args, "version_label"),
         limit=getattr(args, "limit", None),
     )
-    print(render_envelope(envelope), end="")
+    _print_envelope(envelope, args)
     return 0
 
 
@@ -189,7 +273,7 @@ def _handle_index_resume(
         stuck_pass_threshold=getattr(args, "stuck_pass_threshold"),
         sleep_seconds=getattr(args, "sleep_seconds"),
     )
-    print(render_envelope(envelope), end="")
+    _print_envelope(envelope, args)
     return 0 if envelope["status"] == "ok" else 2
 
 
@@ -203,7 +287,7 @@ def _handle_import_status(
         app_slug=getattr(args, "app_slug"),
         version_label=getattr(args, "version_label", None),
     )
-    print(render_envelope(envelope), end="")
+    _print_envelope(envelope, args)
     return 0
 
 
@@ -218,7 +302,7 @@ def _handle_import_retry(
         version_label=getattr(args, "version_label"),
         export_path=getattr(args, "export_path", None),
     )
-    print(render_envelope(envelope), end="")
+    _print_envelope(envelope, args)
     return 0
 
 
@@ -232,7 +316,7 @@ def _handle_import_activate(
         app_slug=getattr(args, "app_slug"),
         version_label=getattr(args, "version_label"),
     )
-    print(render_envelope(envelope), end="")
+    _print_envelope(envelope, args)
     return 0
 
 
@@ -243,7 +327,7 @@ def _handle_app_show(
 ) -> int:
     del parser
     envelope = services.app.show(app_slug=getattr(args, "app_slug"))
-    print(render_envelope(envelope), end="")
+    _print_envelope(envelope, args)
     return 0
 
 
@@ -261,7 +345,7 @@ def _handle_import_add(
         source_system=getattr(args, "source_system"),
         external_app_id=getattr(args, "external_app_id", None),
     )
-    print(render_envelope(envelope), end="")
+    _print_envelope(envelope, args)
     return 0
 
 
@@ -272,7 +356,7 @@ def _handle_import_list(
 ) -> int:
     del parser
     envelope = services.import_.list(app_slug=getattr(args, "app_slug", None))
-    print(render_envelope(envelope), end="")
+    _print_envelope(envelope, args)
     return 0
 
 
@@ -374,7 +458,7 @@ def _handle_placeholder_command(
 ) -> int:
     del parser
     envelope = _dispatch_placeholder(args, services)
-    print(render_envelope(envelope), end="")
+    _print_envelope(envelope, args)
     return 0
 
 
@@ -390,6 +474,9 @@ def _show_parser_help(
 
 
 def _print_envelope(envelope: CommandEnvelope, args: argparse.Namespace) -> None:
+    from specitout.status_actions import resolve_action_hints
+    from specitout.workspace import CURRENT_PROJECT
+    envelope = resolve_action_hints(envelope, CURRENT_PROJECT.get())
     output_format = getattr(args, "output_format", "text")
     renderer = render_json_envelope if output_format == "json" else render_envelope
     print(renderer(envelope), end="")

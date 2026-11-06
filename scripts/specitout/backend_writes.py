@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from specitout.runtime import SpecItOutRuntimeError
+from specitout.progress import report_active
 
 _CONFLICT_TARGETS = {
     "pipeline_runs": ("id",),
@@ -30,6 +31,7 @@ def prepare_rows_for_upsert(table: str, rows: list[dict[str, Any]]) -> list[dict
 
 
 def delete_export_scoped_rows(*, connect: Any, table: str, export_id: str) -> None:
+    deleted_total = 0
     with connect() as conn, conn.cursor() as cur:
         while True:
             cur.execute(
@@ -39,6 +41,10 @@ def delete_export_scoped_rows(*, connect: Any, table: str, export_id: str) -> No
             deleted = int(_extract_scalar(cur.fetchone()))
             if deleted <= 0:
                 break
+            deleted_total += deleted
+            report_active(f"graph_clear.{table}", deleted_total, 0, f"deleted {deleted_total} {table} rows; unit=rows total=unknown; transaction uncommitted")
+        report_active(f"graph_clear.{table}", 0, 0, f"waiting for {table} deletion transaction validation and commit; rows={deleted_total}")
+    report_active(f"graph_clear.{table}", deleted_total, 0, f"committed deletion of {deleted_total} {table} rows; unit=rows total=unknown")
 
 
 def upsert_rows(*, connect: Any, table: str, rows: list[dict[str, Any]]) -> None:
@@ -56,6 +62,7 @@ def upsert_rows(*, connect: Any, table: str, rows: list[dict[str, Any]]) -> None
     else:
         conflict_action = "do nothing"
     max_batch_size = max(1, _MAX_QUERY_PARAMETERS // max(1, len(columns)))
+    written = 0
     for batch in _batched(rows, max_batch_size):
         placeholders: list[str] = []
         params: dict[str, Any] = {}
@@ -72,8 +79,12 @@ insert into specitout.{table} ({", ".join(columns)})
 values {", ".join(placeholders)}
 on conflict ({", ".join(conflict_columns)}) {conflict_action}
 """
+        report_active(f"graph_write.{table}", written, len(rows), f"processing {table} batch of {len(batch)} rows; unit=rows; committed={written}")
         with connect() as conn, conn.cursor() as cur:
             cur.execute(query, params)
+            report_active(f"graph_commit.{table}", written, len(rows), f"waiting for {table} batch transaction validation and commit; unit=rows; committed={written}")
+        written += len(batch)
+        report_active(f"graph_write.{table}", written, len(rows), f"committed {written}/{len(rows)} {table} rows; unit=rows")
 
 
 def coerce_db_value(value: Any) -> Any:

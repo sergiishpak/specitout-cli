@@ -8,7 +8,7 @@ from uuid import UUID
 from bubble_ingestion.errors import IngestionError
 from specitout.embedding_provider import EmbeddingProvider
 from specitout.index_pipeline import run_index_rebuild_pipeline
-from specitout.progress import IndexProgressReporter
+from specitout.progress import IndexProgressReporter, progress_scope, report_active
 from specitout.runtime import SpecItOutRuntimeError
 
 FetchAll = Callable[[str, Mapping[str, object] | None], list[dict[str, object]]]
@@ -196,8 +196,11 @@ def replace_search_documents(
     for association in associations:
         associations_by_document_id.setdefault(str(association["search_document_id"]), []).append(association)
 
+    total = len(documents)
+    report_active("search_document_write", 0, total, f"clearing prior documents; unit=documents total={total}; transaction uncommitted")
     with connect() as conn, conn.cursor() as cur:
         cur.execute("select specitout.clear_export_search_documents(%s)", (export_id,))
+        written = 0
         for document_batch in _batched(documents, SEARCH_DOCUMENT_BATCH_SIZE):
             document_ids = {str(document["id"]) for document in document_batch}
             association_batch = [
@@ -209,6 +212,10 @@ def replace_search_documents(
                 "select specitout.append_export_search_documents_batch(%s, %s, %s)",
                 (export_id, _jsonb(document_batch), _jsonb(association_batch)),
             )
+            written += len(document_batch)
+            report_active("search_document_write", written, total, f"wrote {written}/{total} documents; unit=documents; transaction uncommitted")
+        report_active("search_document_commit", 0, 0, f"waiting for database transaction validation and commit; documents={total}")
+    report_active("search_document_commit", total, total, f"committed {total} documents; database transaction validation completed; unit=documents")
 
 
 def _dedupe_search_documents(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -227,12 +234,19 @@ def persist_search_document_embeddings(
     export_id: str,
     embeddings: list[dict[str, Any]],
 ) -> None:
+    total = len(embeddings)
+    written = 0
+    report_active("embedding_write", 0, total, "writing embeddings; unit=documents; transaction uncommitted")
     with connect() as conn, conn.cursor() as cur:
         for batch in _batched(embeddings, SEARCH_DOCUMENT_BATCH_SIZE):
             cur.execute(
                 "select specitout.persist_search_document_embeddings(%s, %s)",
                 (export_id, _jsonb(batch)),
             )
+            written += len(batch)
+            report_active("embedding_write", written, total, f"wrote {written}/{total} embeddings; unit=documents; transaction uncommitted")
+        report_active("embedding_commit", 0, 0, f"waiting for database transaction validation and commit; documents={total}")
+    report_active("embedding_commit", total, total, f"committed {total} embeddings; unit=documents")
 
 
 def rebuild_index(
@@ -245,14 +259,15 @@ def rebuild_index(
     progress_reporter: IndexProgressReporter | None = None,
 ) -> dict[str, object]:
     try:
-        return run_index_rebuild_pipeline(
-            backend,
-            app_slug=app_slug,
-            version_label=version_label,
-            embedding_provider=embedding_provider,
-            embedding_limit=embedding_limit,
-            progress_reporter=progress_reporter,
-        )
+        with progress_scope(progress_reporter):
+            return run_index_rebuild_pipeline(
+                backend,
+                app_slug=app_slug,
+                version_label=version_label,
+                embedding_provider=embedding_provider,
+                embedding_limit=embedding_limit,
+                progress_reporter=progress_reporter,
+            )
     except IngestionError as exc:
         raise SpecItOutRuntimeError(str(exc)) from exc
 

@@ -49,6 +49,7 @@ class ContextPackBuilder:
         json_writer=None,
         jsonl_writer=None,
         text_writer=None,
+        progress_reporter=None,
     ):
         if overlay_manager_factory is None and not app_slug:
             raise ValueError("ContextPackBuilder requires app_slug when using the default overlay manager")
@@ -70,7 +71,10 @@ class ContextPackBuilder:
             text_writer=text_writer,
         )
         object.__setattr__(self, "dependencies", dependencies)
+        object.__setattr__(self, "progress_reporter", progress_reporter)
+        self.report_progress("parse_export_payload", 0, 0, "processing export payload; unit=items count=unknown")
         data = dependencies.export_loader(self.export_path)
+        self.report_progress("parse_export_payload", 0, 0, "parsed export payload")
         overlay_manager = dependencies.overlay_manager_factory(self.repo_root)
         object.__setattr__(self, "state", make_initial_state(data, overlay_manager))
 
@@ -115,21 +119,28 @@ class ContextPackBuilder:
             "overlay_coverage": {},
             "sample_query_bundles": [],
         }
+        self.report_progress("context_pack.write_outputs", 0, 0, "processing temporary context pack outputs; unit=items count=unknown")
         self.write_outputs(placeholder_verification)
+        self.report_progress("context_pack.verification", 0, 0, "processing context pack verification; unit=checks count=unknown")
         verification = self.build_verification_report()
         self.dependencies.json_writer(self.output_dir / "reports" / "verification_report.json", verification)
         return verification
 
+    def report_progress(self, stage, current, total, message):
+        if self.progress_reporter is not None:
+            self.progress_reporter(stage, current, total, message)
+
     def assemble_graph(self):
-        self.collect_entities()
-        self.build_registries()
-        self.collect_integration_entities()
-        self.collect_application_entities()
-        self.register_virtual_nodes_from_index()
-        self.collect_synthetic_entities()
-        self.extract_edges()
-        self.attach_reverse_usage()
-        self.build_semantics()
+        steps = (
+            "collect_entities", "build_registries", "collect_integration_entities",
+            "collect_application_entities", "register_virtual_nodes_from_index",
+            "collect_synthetic_entities", "extract_edges", "attach_reverse_usage", "build_semantics",
+        )
+        for step_index, method in enumerate(steps):
+            stage = f"context_pack.{method}"
+            self.report_progress(stage, step_index, len(steps), f"processing {method}; unit=graph_steps completed={step_index}")
+            getattr(self, method)()
+            self.report_progress(stage, step_index + 1, len(steps), f"completed {method}; unit=graph_steps; entities={len(self.entity_lookup_by_key)} edges={len(self.edge_rows)}")
 
 
 for _method_name in [

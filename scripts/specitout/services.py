@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import hashlib
 import io
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -13,7 +14,7 @@ from specitout.bundle_service import BundleService
 from specitout.contracts import CommandEnvelope
 from specitout.index_resume import build_resume_envelope
 from specitout.import_recovery import retry_import
-from specitout.progress import ImportProgressReporter, IndexProgressReporter
+from specitout.progress import ImportProgressReporter, IndexProgressReporter, timed_reporter
 from specitout.retrieval_service import RetrievalService
 from specitout.runtime import SpecItOutRuntimeError
 from specitout.status_actions import status_next_actions
@@ -146,6 +147,11 @@ class ImportService:
         path = Path(export_path).expanduser().resolve()
         if not path.is_file():
             raise CliServiceError(f"Bubble export file was not found: {path}")
+        from specitout.workspace import CURRENT_PROJECT, stage_export, validate_export
+        validate_export(path)
+        project = CURRENT_PROJECT.get()
+        if project is not None:
+            path = stage_export(project, path, version_label)
         source_export_hash = hashlib.sha256(path.read_bytes()).hexdigest()
         resolved_external_app_id = external_app_id or _infer_external_app_id(path)
         backend = self._backend_factory()
@@ -207,7 +213,12 @@ class ImportService:
             },
             "warnings": [],
             "degraded": False,
-            "next_actions": ["import list --app <app-slug>", "import status --app <app-slug>"],
+            "next_actions": status_next_actions(
+                readiness_state=str(export.get("readiness_state") or "registered"),
+                is_active=bool(export.get("is_active")), degraded=False,
+                app_slug=app_slug, version_label=version_label,
+                pipeline_status=(pipeline_result.get("pipeline_run") or {}).get("status"),
+            ),
         }
 
     def list(self, *, app_slug: str | None) -> CommandEnvelope:
@@ -275,6 +286,9 @@ class ImportService:
                 readiness_state=readiness_state,
                 is_active=bool(export.get("is_active")),
                 degraded=degraded,
+                app_slug=app_slug,
+                version_label=str(export.get("version_label") or version_label or "") or None,
+                pipeline_status=(data.get("pipeline_run") or {}).get("status"),
             ),
         }
 
@@ -368,7 +382,11 @@ class IndexService:
             },
             "warnings": [],
             "degraded": readiness_status in {"failed", "degraded"},
-            "next_actions": ["import activate --app <app-slug> --version <version>", "query search --app <app-slug>"],
+            "next_actions": status_next_actions(
+                readiness_state=readiness_status, is_active=False,
+                degraded=readiness_status in {"failed", "degraded"},
+                app_slug=app_slug, version_label=version_label,
+            ),
         }
 
     def resume(self, *, app_slug: str, version_label: str, initial_limit: int, min_limit: int, max_passes: int, stuck_pass_threshold: int, sleep_seconds: float) -> CommandEnvelope:
@@ -382,7 +400,7 @@ class IndexService:
             stuck_pass_threshold=stuck_pass_threshold,
             sleep_seconds=sleep_seconds,
             progress_reporter=self._progress_reporter,
-            emit=lambda line: print(line, flush=True),
+            emit=lambda line: print(line, file=sys.stderr, flush=True),
         )
 
 
@@ -448,6 +466,12 @@ class CliServices:
     trial: TrialService
     help: HelpService
 
+    def close_progress_reporters(self) -> None:
+        for service in (self.import_, self.index):
+            close = getattr(service._progress_reporter, "close", None)
+            if close is not None:
+                close()
+
 
 def build_cli_services(
     *,
@@ -456,8 +480,8 @@ def build_cli_services(
 ) -> CliServices:
     return CliServices(
         app=ApplicationCatalogService(backend_factory),
-        import_=ImportService(backend_factory, progress_reporter=_print_import_progress),
-        index=IndexService(backend_factory, progress_reporter=_print_index_progress),
+        import_=ImportService(backend_factory, progress_reporter=timed_reporter("import add")),
+        index=IndexService(backend_factory, progress_reporter=timed_reporter("index rebuild")),
         task=TaskService(),
         retrieval=RetrievalService(backend_factory),
         bundle=BundleService(backend_factory),
@@ -466,13 +490,6 @@ def build_cli_services(
         help=HelpService(parser_factory=parser_factory),
     )
 
-
-def _print_import_progress(stage: str, current: int, total: int, message: str) -> None:
-    print(f"progress: import add {current}/{total} {stage} - {message}", flush=True)
-
-
-def _print_index_progress(stage: str, current: int, total: int, message: str) -> None:
-    print(f"progress: index rebuild {current}/{total} {stage} - {message}", flush=True)
 
 
 def _infer_external_app_id(export_path: Path) -> str | None:

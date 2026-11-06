@@ -39,6 +39,7 @@ class RetrievalService:
             "scope": {
                 "app_slug": app_slug,
                 "version_label": str(resolved_version) if resolved_version else None,
+                "export_id": str(result["resolved_export_id"]) if result.get("resolved_export_id") else None,
             },
             "data": {
                 "state": str(result.get("state") or "search_ready"),
@@ -47,6 +48,8 @@ class RetrievalService:
                 "limit": limit,
                 "semantic_available": semantic_available,
                 "semantic_used": semantic_used,
+                "ranking_policy": result.get("ranking_policy"),
+                "candidate_document_limit": result.get("candidate_document_limit"),
                 "answer_type": result.get("answer_type"),
                 "answer": result.get("answer"),
                 "count": result.get("count"),
@@ -95,6 +98,7 @@ class RetrievalService:
             "scope": {
                 "app_slug": app_slug,
                 "version_label": str(resolved_version) if resolved_version else None,
+                "export_id": str(result["resolved_export_id"]) if result.get("resolved_export_id") else None,
             },
             "data": {
                 "state": "entity_found",
@@ -136,6 +140,7 @@ class RetrievalService:
             "scope": {
                 "app_slug": app_slug,
                 "version_label": str(resolved_version) if resolved_version else None,
+                "export_id": str(result["resolved_export_id"]) if result.get("resolved_export_id") else None,
             },
             "data": {
                 "state": "usage_ready",
@@ -188,6 +193,7 @@ class RetrievalService:
             "scope": {
                 "app_slug": app_slug,
                 "version_label": str(resolved_version) if resolved_version else None,
+                "export_id": str(result["resolved_export_id"]) if result.get("resolved_export_id") else None,
             },
             "data": {
                 "state": "paths_ready",
@@ -220,6 +226,10 @@ def _normalize_search_result(result: dict[str, object]) -> dict[str, object]:
         "match_type": _search_match_type(reasons, result),
         "score": _first_present(result, "score", "ranking_score"),
         "evidence": _format_evidence_links(result.get("evidence_links")) or result.get("evidence"),
+        "evidence_links": list(result.get("evidence_links") or []),
+        "matched_documents": list(result.get("matched_documents") or []),
+        "ranking_reasons": list(result.get("ranking_reasons") or []),
+        "name_hints": list(result.get("name_hints") or []),
     }
 
 
@@ -262,6 +272,7 @@ def _normalize_usage_relations(relations: object, neighbors: object) -> list[dic
                 "entity_type": entity_data.get("entity_type") or neighbor.get("entity_type"),
                 "canonical_name": _first_present(entity_data, "canonical_name", "display_name", "name"),
                 "evidence": edge_data.get("evidence_path") or neighbor.get("evidence"),
+                "name_hints": list(entity_data.get("name_hints") or []),
             }
         )
     return normalized

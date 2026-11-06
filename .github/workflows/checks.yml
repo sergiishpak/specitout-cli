@@ -1,0 +1,27 @@
+name: Checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  unit-and-package:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -e '.[dev]' build
+      - run: python -m pytest -q
+      - run: python -m build
+      - name: Verify wheel outside checkout
+        shell: bash
+        run: |
+          python -m venv /tmp/specitout-wheel
+          /tmp/specitout-wheel/bin/pip install --no-deps dist/*.whl
+          cd /tmp
+          /tmp/specitout-wheel/bin/specitout --version
+          /tmp/specitout-wheel/bin/specitout --help
+          /tmp/specitout-wheel/bin/python -c "from importlib.resources import files; assert files('specitout').joinpath('resources/runtime/migrations/0001_specitout_runtime_baseline.sql').is_file()"

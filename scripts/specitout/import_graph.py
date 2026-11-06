@@ -17,6 +17,7 @@ from bubble_ingestion.transforms import (
     order_entity_rows_for_upsert,
 )
 from specitout.backend_writes import prepare_rows_for_upsert
+from specitout.progress import ImportProgressReporter
 
 
 class _NullOverlayManager:
@@ -75,6 +76,7 @@ def build_normalized_import_graph(
     version_label: str,
     export_path: Path,
     source_export_hash: str,
+    progress_reporter: ImportProgressReporter | None = None,
 ) -> NormalizedImportGraph:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
@@ -89,16 +91,26 @@ def build_normalized_import_graph(
             repo_root,
             app_slug=app_slug,
             overlay_manager_factory=lambda _repo_root: _NullOverlayManager(),
+            progress_reporter=progress_reporter,
         )
         builder.build()
+        if progress_reporter is not None:
+            progress_reporter("context_pack_build", 4, 7, "built temporary context pack; unit=import_stages")
+            progress_reporter("graph_normalization.entities", 0, 0, "processing normalized entity rows; unit=rows count=unknown")
 
         entity_rows, _matched_supplement_entities = build_entities(export_id, pack_dir)
         entity_rows = order_entity_rows_for_upsert(normalize_entity_parent_keys(entity_rows))
+        if progress_reporter is not None:
+            progress_reporter("graph_normalization.entities", len(entity_rows), len(entity_rows), "normalized entities; unit=rows")
+            progress_reporter("graph_normalization.edges", 0, 0, "processing normalized edge rows; unit=rows count=unknown")
         edge_rows = build_edges(
             export_id,
             pack_dir,
             edge_id_scope=f"{app_slug}:{version_label}:{source_export_hash}",
         )
+        if progress_reporter is not None:
+            progress_reporter("graph_normalization.edges", len(edge_rows), len(edge_rows), "normalized edges; unit=rows")
+            progress_reporter("graph_normalization.facets", 0, 0, "processing facets and semantic indexes; unit=rows count=unknown")
         return NormalizedImportGraph(
             entities=entity_rows,
             edges=edge_rows,
