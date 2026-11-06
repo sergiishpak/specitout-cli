@@ -16,6 +16,8 @@ Versions use Semantic Versioning. Entries describe repository versions; publicat
   unavailable socket-default regression.
 - Verify installation of missing native prerequisites in an isolated Ubuntu
   environment and implicit skill discovery/use in a fresh Codex CLI session.
+- Clarify search completion and canonical-key handling in the installed skill
+  after observing an avoidable identifier-guessing detour in a follow-up session.
 
 ## [0.2.1] - 2026-11-06
 ### Fixed

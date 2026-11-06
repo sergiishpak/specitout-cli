@@ -13,6 +13,17 @@ specitout --project "/absolute/private/my-app" query usage --version v1 --entity
 
 Use returned canonical identifiers in subsequent calls. Exact identifiers and lexical matches often suffice; semantic matches help find candidates when names differ. A search hit is an anchor, not proof of a relationship or business intent. Check canonical entity details and graph edges. When a root search misses necessary nested surfaces, try `--mode deep` and explain why scope expanded.
 
+Search can take time while the embedding library loads. If the execution tool
+returns a running session, wait/poll until the command exits and its JSON result
+is available before issuing a dependent lookup. Empty output from a running
+command is not an empty search result.
+
+Copy `data.results[].entity_key` verbatim into `--entity`, `--from` and `--to`.
+A raw Bubble ID or an invented `workflow:ID` string is not a canonical key. If a
+lookup fails, return to search and copy its key rather than guessing another
+format. Ordinary investigation uses the CLI; direct SQL is unnecessary for
+resolving names or tracing relationships.
+
 ```sh
 specitout --project "/absolute/private/my-app" query paths --version v1 --from "ENTITY_A" --to "ENTITY_B" --max-hops 3 --max-paths 3 --format json
 specitout --project "/absolute/private/my-app" bundle build --version v1 --entity "ENTITY_KEY" --max-hops 1 --entity-limit 20 --edge-limit 30 --format json

@@ -168,9 +168,18 @@ unavailable socket default after real `initdb`. Ordinary tests remained
 98 passed / one opt-in native smoke skipped, and native smoke passed separately.
 An independent read-only review found no material issues.
 
+The published 0.2.2 CLI and matching complete skill were then installed from
+commit [`2fd086247ceac3c011396337976fda95b8edaa2b`](https://github.com/sergiishpak/specitout-cli/commit/2fd086247ceac3c011396337976fda95b8edaa2b)
+in that clean Linux environment. A new workspace and empty model cache passed
+all eleven native CLI cases. Additional SQL checks confirmed the workspace-owned
+data directory, localhost-only TCP, disabled Unix sockets, loaded extensions,
+ten vectors and 384 dimensions. The runtime was stopped after verification.
+
 Native Ubuntu CI now exercises the matched Postgres 16 packages and full
 workspace lifecycle with deterministic embeddings. As with the earlier CI
 checks, deterministic vectors verify runtime plumbing rather than model quality.
+All three [0.2.2 CI jobs](https://github.com/sergiishpak/specitout-cli/actions/runs/42311962823)
+passed: native Ubuntu and Python 3.11/3.12 tests/package checks.
 The [Ubuntu prerequisite recipe](../skills/specitout/references/setup.md#ubuntu-2404-prerequisites)
 travels with the installed skill. Linux dependency installation in this run
 also downloaded CUDA-related PyTorch packages despite CPU model execution;
@@ -196,6 +205,16 @@ It used CLI usage and entity evidence to return the correct scheduling workflow
 with the version and literal source location. It preserved the original export
 and stopped the workspace database. Command events and final evidence were
 checked; this is actual use, beyond frontmatter validation or catalog presence.
+
+After updating both installed components to the public 0.2.2 revision, another
+fresh session discovered the skill and answered from the existing index without
+reimporting or rebuilding. It returned the correct evidence and stopped the
+database, but guessed unsupported identifier formats and made a read-only SQL
+detour before using the canonical key. Discovery does not guarantee efficient
+tool selection in every run. The skill now explicitly requires waiting for a
+running search, copying `data.results[].entity_key` verbatim and recovering
+through CLI search rather than inventing keys or inspecting SQL for ordinary
+investigation.
 
 This verifies implicit discovery in a fresh Codex CLI session. It does not
 establish discovery in every agent host or the desktop skill picker. The method
