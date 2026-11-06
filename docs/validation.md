@@ -216,6 +216,14 @@ running search, copying `data.results[].entity_key` verbatim and recovering
 through CLI search rather than inventing keys or inspecting SQL for ordinary
 investigation.
 
+The same prompt was retested in another fresh session against public commit
+[`16efa494c24a75fd6c861c641533e32ef0003e36`](https://github.com/sergiishpak/specitout-cli/commit/16efa494c24a75fd6c861c641533e32ef0003e36).
+That session copied a canonical key from the completed search, used CLI usage
+evidence and returned the correct source-backed answer without guessed keys,
+direct SQL, reimport or rebuild. Its database was confirmed stopped afterward.
+The disposable Linux machine was removed after its synthetic evidence was
+exported; the normal user CLI and skill remain installed at 0.2.2.
+
 This verifies implicit discovery in a fresh Codex CLI session. It does not
 establish discovery in every agent host or the desktop skill picker. The method
 follows the official [skill discovery](https://learn.chatgpt.com/docs/build-skills)
