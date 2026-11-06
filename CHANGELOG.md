@@ -21,6 +21,8 @@ Versions use Semantic Versioning. Entries describe repository versions; publicat
 ### Documentation
 - Record private real-export acceptance and preserved-index regression coverage;
   keep all dataset-specific inputs, measurements and derived outputs private.
+- Verify public-URL bootstrap with empty package/model caches, matching CLI/skill
+  provenance, real synthetic embeddings and workspace-preserving uninstall.
 
 ## [0.2.0] - 2026-11-04
 ### Added

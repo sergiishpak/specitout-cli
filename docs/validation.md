@@ -99,16 +99,56 @@ or from the current public repository URL.
 Full-index compute cost has not been removed: root-first indexing is a separate
 future optimization, and no faster end-to-end processing claim is made here.
 
+## Public URL installation — 2026-11-07
+
+The documented bootstrap was tested against public commit
+[`ed30cb75f0208fa83fa3a839f87675c5a77a4292`](https://github.com/sergiishpak/specitout-cli/commit/ed30cb75f0208fa83fa3a839f87675c5a77a4292),
+with Git credentials disabled and separate, initially empty tool, package-cache,
+skill and model-cache directories. The test ran outside the development checkout.
+This closes the public-bootstrap gap recorded in the earlier local-wheel tests.
+
+Verified on macOS with uv 0.11.3 and Python 3.12.13:
+
+- Anonymous public clone, immutable revision selection, dry run and normal
+  `uv tool install` from the public Git URL succeeded. No local wheel,
+  dependency constraints or existing package cache was supplied.
+- The CLI reported 0.2.1. Its installed VCS metadata and all five copied skill
+  files matched the same commit; packaged SQL was present.
+- A new workspace outside the clone initialized without Git or a running
+  database. Passive diagnostics found the native prerequisites.
+- A generated JSON-shaped `.bubble` export was imported, hash-verified and
+  processed in a new native Postgres/pgvector runtime. The real local embedding
+  model downloaded into an empty cache; all ten synthetic search documents
+  received embeddings and the version became ready and active.
+- Search used semantic retrieval without degradation. Entity, inbound usage,
+  paths and bounded bundles returned source evidence, including the generated
+  approval-to-notification workflow relationship. Ready resume took zero passes.
+- Cold loading emitted immediate and periodic stderr feedback; stdout remained
+  valid JSON. The synthetic test is not an application performance benchmark.
+- Repeating the same pinned bootstrap reused the identical skill. The CLI and
+  copied references worked after the installation checkout was moved away.
+- The test database was stopped. Uninstalling the isolated CLI removed its
+  executable and preserved the workspace, staged source, original synthetic
+  export and skill. Existing private acceptance workspaces were untouched.
+
+Python, uv and matching Postgres/extension binaries were already installed on
+this Mac. This is not a clean operating-system provisioning test. The skill was
+installed into an isolated test directory and used directly; discovery in a new
+agent-host session remains unverified.
+
+The [GitHub Checks run](https://github.com/sergiishpak/specitout-cli/actions/runs/42309579692)
+also passed both Ubuntu Python 3.11 and 3.12 jobs: ordinary tests, package build,
+and installed-wheel checks outside the checkout. Those jobs do not exercise the
+native Linux Postgres runtime.
+
 ## Acceptance still required
 
 - Additional private exports and `.bubble` files: parser coverage, source-locator
   handling, interruption recovery and retrieval relevance beyond this sample.
   Keep detailed logs and client-derived artifacts outside this repository.
 - A fresh external agent session discovering and using the installed skill.
-- Public remote bootstrap against the commit containing these changes, after
-  publication. The current remote HEAD must not be assumed to include them.
-- Linux runtime validation and the newly added GitHub CI jobs have not run as
-  part of this local session. Native Windows/WSL are not validated targets.
+- Provisioning native prerequisites on a clean operating system and native
+  Linux runtime validation. Native Windows/WSL are not validated targets.
 
 The public repository contains no Bubble export JSON files. Synthetic input for
 checks is generated within temporary test directories. The private acceptance
